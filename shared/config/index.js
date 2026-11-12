@@ -6,7 +6,7 @@
 //   echoed. Missing required secrets throw AppError(CONFIG_MISSING).
 // - data / content / config-repo / logs are validated as SEPARATE path roots.
 
-import { resolve } from 'node:path';
+import { resolve, isAbsolute } from 'node:path';
 import { AppError } from '../errors.js';
 
 const DEFAULTS = Object.freeze({
@@ -19,7 +19,15 @@ const DEFAULTS = Object.freeze({
   // Config Repo checkout location — configuration, never a hardcoded absolute
   // path. Defaults to the sibling bmb-infrastructure checkout for local dev.
   CONFIG_REPO_ROOT: '../bmb-infrastructure',
-  LOGS_ROOT: './logs'
+  LOGS_ROOT: './logs',
+  // ── Argus execution (Stage 3+4) ──
+  // Execution is OFF by default. It may only be enabled in the explicit
+  // isolated-test mode with a non-production projects root.
+  ARGUS_EXECUTION_ENABLED: 'false',
+  ARGUS_MODE: 'local',
+  ARGUS_STATE_ROOT: './logs/argus',
+  REGISTRY_PATH: './data/registry/applications.json',
+  CONFIG_REPO_BRANCH: 'main'
 });
 
 // Secrets required only when NOT in local/test mode.
@@ -49,6 +57,42 @@ function assertDistinctRoots(roots) {
     }
     seen.set(key, name);
   }
+}
+
+// Argus execution settings. Fails closed: enabling execution requires the
+// explicit isolated-test mode, a non-production environment, and an absolute
+// projects root that is NOT the production `/projects`.
+function loadArgusSettings(get, env, isProd) {
+  const executionEnabled = get('ARGUS_EXECUTION_ENABLED') === 'true';
+  const mode = get('ARGUS_MODE');
+  const projectsRoot = env.PROJECTS_ROOT && env.PROJECTS_ROOT.trim() !== '' ? env.PROJECTS_ROOT : null;
+
+  if (executionEnabled) {
+    if (isProd) {
+      throw new AppError('CONFIG_INVALID', 'Argus execution cannot be enabled in production in this stage');
+    }
+    if (mode !== 'isolated-test') {
+      throw new AppError('CONFIG_INVALID', 'Argus execution requires ARGUS_MODE=isolated-test');
+    }
+    if (!projectsRoot || !isAbsolute(projectsRoot)) {
+      throw new AppError('CONFIG_INVALID', 'Argus execution requires an absolute PROJECTS_ROOT');
+    }
+    const norm = resolve(projectsRoot).replace(/\\/g, '/').replace(/\/+$/, '');
+    if (norm === '/projects' || norm.endsWith(':/projects')) {
+      throw new AppError('CONFIG_INVALID', 'PROJECTS_ROOT must not be the production /projects root');
+    }
+  }
+
+  return Object.freeze({
+    executionEnabled,
+    mode,
+    projectsRoot,
+    stateRoot: get('ARGUS_STATE_ROOT'),
+    registryPath: get('REGISTRY_PATH'),
+    configRepoBranch: get('CONFIG_REPO_BRANCH'),
+    nginxBin: env.NGINX_BIN || null,
+    nginxPrefix: env.NGINX_PREFIX || null
+  });
 }
 
 /**
@@ -90,7 +134,10 @@ export function loadConfig({ env = process.env, requireSecrets } = {}) {
   });
   assertDistinctRoots(pathRoots);
 
+  const argus = loadArgusSettings(get, env, isProd);
+
   return Object.freeze({
+    argus,
     nodeEnv,
     isProd,
     manageApiPort: toPort('MANAGE_API_PORT', get('MANAGE_API_PORT')),

@@ -9,9 +9,6 @@ import {
   resolvePm2File,
   resolveNginxFile,
   manifestPath,
-  writeConfig,
-  commit,
-  push,
   reconcile
 } from '../shared/config-repo/index.js';
 
@@ -90,8 +87,9 @@ test('malformed manifest reports INVALID_MANIFEST', () => {
   }
 });
 
-test('write/commit/push/reconcile are disabled in Stage 2', () => {
-  for (const fn of [writeConfig, commit, push, reconcile]) {
-    assert.equal(codeOf(() => fn()), 'NOT_IMPLEMENTED');
-  }
+// Stage 3+4: writes are implemented as the scoped persistOwnedFiles workflow
+// (tests/argus/config-repo-write.test.js). The Config Repo itself never
+// "reconciles" — PM2 reconciliation is an Argus operation.
+test('config repo has no reconcile of its own', () => {
+  assert.equal(codeOf(() => reconcile()), 'NOT_IMPLEMENTED');
 });

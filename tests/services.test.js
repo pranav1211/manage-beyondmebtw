@@ -67,13 +67,13 @@ test('argus: /health reports execution disabled', async () => {
   }
 });
 
-test('argus: known operation is refused (501, no execution in Stage 1)', async () => {
-  const { base, close } = await serve(createArgusApp(cfg));
+test('argus: known operation is refused when execution is disabled (501, after auth)', async () => {
+  const { base, close } = await serve(createArgusApp(cfg, { env: { ARGUS_INTERNAL_TOKEN: 't0ken' } }));
   try {
     const res = await fetch(`${base}/operations`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operation: 'deploy', application: 'beyondmebtw' })
+      headers: { 'content-type': 'application/json', authorization: 'Bearer t0ken' },
+      body: JSON.stringify({ schemaVersion: 1, operation: 'deploy', application: 'beyondmebtw' })
     });
     assert.equal(res.status, 501);
     const body = await res.json();
@@ -83,13 +83,27 @@ test('argus: known operation is refused (501, no execution in Stage 1)', async (
   }
 });
 
-test('argus: unknown/arbitrary operation is rejected (400)', async () => {
+test('argus: unauthenticated requests are rejected (401) before anything else', async () => {
   const { base, close } = await serve(createArgusApp(cfg));
   try {
     const res = await fetch(`${base}/operations`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operation: 'rm -rf /' })
+      body: JSON.stringify({ schemaVersion: 1, operation: 'deploy', application: 'beyondmebtw' })
+    });
+    assert.equal(res.status, 401);
+  } finally {
+    await close();
+  }
+});
+
+test('argus: unknown/arbitrary operation is rejected (400)', async () => {
+  const { base, close } = await serve(createArgusApp(cfg, { env: { ARGUS_INTERNAL_TOKEN: 't0ken' } }));
+  try {
+    const res = await fetch(`${base}/operations`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer t0ken' },
+      body: JSON.stringify({ schemaVersion: 1, operation: 'rm -rf /', application: 'x' })
     });
     assert.equal(res.status, 400);
     const body = await res.json();

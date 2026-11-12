@@ -58,6 +58,11 @@
     },
     "enabled": {
       "type": "boolean"
+    },
+    "webhookSecretRef": {
+      "type": "string",
+      "description": "Name of the env var holding this target's webhook secret (custom secret). Omitted = default secret policy. Never the secret value.",
+      "pattern": "^[A-Z][A-Z0-9_]*$"
     }
   },
   "allOf": [

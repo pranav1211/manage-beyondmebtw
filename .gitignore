@@ -1,0 +1,36 @@
+# ── Secrets & environment (NEVER commit real secrets) ────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+infrastructure/env/
+
+# ── Dependencies ─────────────────────────────────────────────────────
+node_modules/
+
+# ── Build outputs / generated artifacts ──────────────────────────────
+dist/
+apps/manage/dist/
+.vite/
+coverage/
+
+# ── Runtime logs & operational state (not canonical data) ────────────
+logs/
+*.log
+.operations/
+*.journal
+tmp/
+.tmp/
+
+# ── OS / editor cruft ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ──────────────────────────────────────────────────────────────────────
+# IMPORTANT: canonical state is Git-backed — do NOT ignore these:
+#   data/        (canonical JSON datasets)
+#   content/     (canonical Minis Markdown)
+# They are intentionally tracked. Keep this comment as a guardrail.
+# ──────────────────────────────────────────────────────────────────────

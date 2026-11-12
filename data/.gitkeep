@@ -1,0 +1,2 @@
+# Canonical JSON data root. Git-backed — do NOT add this directory to .gitignore.
+# Datasets (blog, photos, projects, home, …) are migrated here in Stage 6+.

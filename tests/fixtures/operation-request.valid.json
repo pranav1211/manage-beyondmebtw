@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "operation": "deploy",
+  "application": "minis",
+  "params": { "branch": "main" }
+}

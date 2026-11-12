@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "repository": "git@github.com:pranav1211/bmb-infrastructure.git",
+  "branch": "main",
+  "revision": null,
+  "configRoots": {
+    "pm2": "infrastructure/config/pm2",
+    "nginx": "infrastructure/config/nginx"
+  },
+  "pm2": [
+    { "application": "manage-beyondmebtw", "file": null, "managedByArgus": true, "status": "pending" },
+    { "application": "minis", "file": null, "managedByArgus": true, "status": "pending" },
+    { "application": "minis-private", "file": null, "managedByArgus": true, "status": "pending" },
+    { "application": "beyond-money", "file": null, "managedByArgus": true, "status": "pending" }
+  ],
+  "nginx": [
+    { "host": "manage.beyondmebtw.com", "file": "manage.conf", "owner": "manage-beyondmebtw" },
+    { "host": "beyondmebtw.com", "file": "beyondmebtw.conf", "owner": "beyondmebtw" },
+    { "host": "minis.beyondmebtw.com", "file": "minis.conf", "owner": "minis" }
+  ],
+  "excluded": ["rtf-git", "rtf-web"]
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "repository": "git@github.com:pranav1211/bmb-infrastructure.git",
+  "branch": "main",
+  "configRoots": {
+    "pm2": "infrastructure/config/pm2",
+    "nginx": "infrastructure/config/nginx"
+  },
+  "pm2": [],
+  "nginx": []
+}

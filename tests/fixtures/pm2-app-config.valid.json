@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "application": "manage-beyondmebtw",
+  "processes": [
+    {
+      "name": "manage-api",
+      "script": "services/manage-api/index.js",
+      "cwd": "/projects/manage",
+      "interpreter": "node",
+      "execMode": "fork",
+      "instances": 1,
+      "port": 7000,
+      "envRefs": ["MANAGE_SESSION_SECRET", "MANAGE_API_PORT"]
+    },
+    {
+      "name": "argus",
+      "script": "services/argus/argus.js",
+      "cwd": "/projects/manage",
+      "execMode": "fork",
+      "instances": 1,
+      "port": 6040,
+      "envRefs": ["ARGUS_INTERNAL_TOKEN", "ARGUS_PORT"]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "application": "beyondmebtw",
+  "repository": "git@github.com:pranav1211/Beyondmebtw.git",
+  "branch": "main",
+  "type": "docker",
+  "deploymentPath": "/projects/beyondmebtw",
+  "domain": "beyondmebtw.com",
+  "isPrimaryDomain": true,
+  "pm2Config": null,
+  "nginxConfig": null,
+  "enabled": true
+}

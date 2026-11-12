@@ -1,0 +1,7 @@
+{
+  "key": "evil.key",
+  "root": "data",
+  "path": "../../etc/passwd",
+  "format": "json",
+  "access": "public"
+}

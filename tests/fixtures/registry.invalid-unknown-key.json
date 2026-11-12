@@ -1,0 +1,13 @@
+{
+  "application": "minis",
+  "repository": "git@github.com:pranav1211/minis.git",
+  "branch": "main",
+  "type": "node",
+  "deploymentPath": "/projects/minis",
+  "domain": "minis.beyondmebtw.com",
+  "isPrimaryDomain": false,
+  "pm2Config": "minis.config.js",
+  "nginxConfig": "minis.conf",
+  "enabled": true,
+  "port": 7004
+}

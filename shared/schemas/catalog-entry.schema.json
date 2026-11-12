@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/catalog-entry.json",
+  "title": "Canonical data catalog entry",
+  "description": "Maps a stable logical key to a relative path under a canonical root, its format, API exposure and access policy. Clients address resources by key, never by filesystem path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["key", "root", "path", "format", "access"],
+  "properties": {
+    "key": {
+      "type": "string",
+      "description": "Stable logical resource key, e.g. 'blog.categories'.",
+      "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$"
+    },
+    "root": {
+      "type": "string",
+      "enum": ["data", "content"]
+    },
+    "path": {
+      "type": "string",
+      "description": "Relative path under the root. No absolute paths, no traversal.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+      "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+    },
+    "format": {
+      "type": "string",
+      "enum": ["json", "markdown"]
+    },
+    "access": {
+      "type": "string",
+      "enum": ["public", "private"]
+    },
+    "writable": {
+      "type": "boolean",
+      "default": true
+    },
+    "schemaRef": {
+      "type": ["string", "null"],
+      "description": "Optional id of a per-dataset validation schema."
+    }
+  }
+}

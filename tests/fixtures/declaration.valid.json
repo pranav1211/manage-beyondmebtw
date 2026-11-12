@@ -1,0 +1,11 @@
+{
+  "application": "manage-beyondmebtw",
+  "repository": "git@github.com:pranav1211/manage-beyondmebtw.git",
+  "branch": "main",
+  "type": "node",
+  "deploymentPath": "/projects/manage",
+  "domain": "manage.beyondmebtw.com",
+  "isPrimaryDomain": true,
+  "pm2Config": "manage.config.js",
+  "nginxConfig": "manage.conf"
+}

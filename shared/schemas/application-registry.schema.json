@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/application-registry.json",
+  "title": "Application registry entry",
+  "description": "Authoritative deployment configuration held by Manage. Ports are NOT duplicated here (they live in PM2 config).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application",
+    "repository",
+    "branch",
+    "type",
+    "deploymentPath",
+    "domain",
+    "isPrimaryDomain",
+    "pm2Config",
+    "nginxConfig",
+    "enabled"
+  ],
+  "properties": {
+    "application": {
+      "type": "string",
+      "description": "Repository name / stable application identity.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "repository": {
+      "type": "string",
+      "description": "Git SSH URL.",
+      "pattern": "^git@github\\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git$"
+    },
+    "branch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["static", "node"]
+    },
+    "deploymentPath": {
+      "type": "string",
+      "description": "Absolute server path.",
+      "pattern": "^/.+"
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "isPrimaryDomain": {
+      "type": "boolean"
+    },
+    "pm2Config": {
+      "type": ["string", "null"],
+      "description": "Infrastructure PM2 config filename, or null for static apps."
+    },
+    "nginxConfig": {
+      "type": ["string", "null"],
+      "description": "Infrastructure Nginx config filename, or null for wildcard default."
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "static" } } },
+      "then": { "properties": { "pm2Config": { "type": "null" } } }
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "key": "blog.categories",
+  "root": "data",
+  "path": "blog/categories.json",
+  "format": "json",
+  "access": "public",
+  "writable": true,
+  "schemaRef": null
+}

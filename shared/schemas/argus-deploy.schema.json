@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/argus-deploy.json",
+  "title": "Repository deployment declaration (argus.deploy.json)",
+  "description": "Repo-side declaration / checklist mirroring the deployment-critical fields. It is NOT production authority; Manage's registry wins on mismatch. No secrets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "application",
+    "repository",
+    "branch",
+    "type",
+    "deploymentPath",
+    "domain",
+    "isPrimaryDomain",
+    "pm2Config",
+    "nginxConfig"
+  ],
+  "properties": {
+    "application": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "repository": {
+      "type": "string",
+      "pattern": "^git@github\\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git$"
+    },
+    "branch": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["static", "node"]
+    },
+    "deploymentPath": {
+      "type": "string",
+      "pattern": "^/.+"
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "isPrimaryDomain": {
+      "type": "boolean"
+    },
+    "pm2Config": {
+      "type": ["string", "null"]
+    },
+    "nginxConfig": {
+      "type": ["string", "null"]
+    }
+  }
+}

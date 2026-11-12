@@ -1,10 +1,12 @@
 // Configuration loading + validation.
-// - Reads from process.env (a `.env` loader can be layered later; Stage 1 keeps
-//   it dependency-free and reads the real environment).
+// - Reads from process.env (a `.env` loader can be layered later; the loader
+//   stays dependency-free and reads the real environment).
 // - Non-secret defaults are provided so services can boot in local/test mode.
 // - Secrets are validated for PRESENCE only; their values are never logged or
 //   echoed. Missing required secrets throw AppError(CONFIG_MISSING).
+// - data / content / config-repo / logs are validated as SEPARATE path roots.
 
+import { resolve } from 'node:path';
 import { AppError } from '../errors.js';
 
 const DEFAULTS = Object.freeze({
@@ -13,7 +15,11 @@ const DEFAULTS = Object.freeze({
   ARGUS_PORT: '6040',
   ARGUS_BIND: '127.0.0.1',
   DATA_ROOT: './data',
-  CONTENT_ROOT: './content'
+  CONTENT_ROOT: './content',
+  // Config Repo checkout location — configuration, never a hardcoded absolute
+  // path. Defaults to the sibling bmb-infrastructure checkout for local dev.
+  CONFIG_REPO_ROOT: '../bmb-infrastructure',
+  LOGS_ROOT: './logs'
 });
 
 // Secrets required only when NOT in local/test mode.
@@ -28,6 +34,21 @@ function toPort(name, raw) {
     throw new AppError('CONFIG_INVALID', `Invalid port for ${name}`, { name });
   }
   return n;
+}
+
+// The four Git/runtime roots must be distinct locations — data, content, the
+// Config Repo checkout, and logs each have a different owner and lifecycle.
+function assertDistinctRoots(roots) {
+  const seen = new Map();
+  for (const [name, value] of Object.entries(roots)) {
+    const key = resolve(value);
+    if (seen.has(key)) {
+      throw new AppError('CONFIG_INVALID', 'Path roots must be distinct', {
+        roots: [seen.get(key), name]
+      });
+    }
+    seen.set(key, name);
+  }
 }
 
 /**
@@ -61,18 +82,30 @@ export function loadConfig({ env = process.env, requireSecrets } = {}) {
     });
   }
 
+  const pathRoots = Object.freeze({
+    data: get('DATA_ROOT'),
+    content: get('CONTENT_ROOT'),
+    configRepo: get('CONFIG_REPO_ROOT'),
+    logs: get('LOGS_ROOT')
+  });
+  assertDistinctRoots(pathRoots);
+
   return Object.freeze({
     nodeEnv,
     isProd,
     manageApiPort: toPort('MANAGE_API_PORT', get('MANAGE_API_PORT')),
     argusPort: toPort('ARGUS_PORT', get('ARGUS_PORT')),
     argusBind,
-    dataRoot: get('DATA_ROOT'),
-    contentRoot: get('CONTENT_ROOT'),
+    // Individual roots (back-compat) + the grouped, validated set.
+    dataRoot: pathRoots.data,
+    contentRoot: pathRoots.content,
+    configRepoRoot: pathRoots.configRepo,
+    logsRoot: pathRoots.logs,
+    pathRoots,
     // Presence flags only — values are intentionally NOT surfaced here.
     hasSessionSecret: Boolean(env.MANAGE_SESSION_SECRET),
     hasArgusToken: Boolean(env.ARGUS_INTERNAL_TOKEN)
   });
 }
 
-export { REQUIRED_SECRETS };
+export { REQUIRED_SECRETS, DEFAULTS };

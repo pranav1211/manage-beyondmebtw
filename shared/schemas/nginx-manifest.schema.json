@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/nginx-manifest.json",
+  "title": "Nginx configuration manifest",
+  "description": "Identifies the Nginx config files owned by the Config Repo and their validation targets. Describes desired configuration metadata, not active server state. No secrets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sites"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "confFile", "owner", "routeClass"],
+        "properties": {
+          "host": { "type": "string", "minLength": 1 },
+          "confFile": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.conf$",
+            "description": "Filename only; resolved under the Config Repo nginx root."
+          },
+          "owner": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "routeClass": {
+            "type": "string",
+            "enum": ["standard", "custom", "legacy", "rtf-preserved"]
+          },
+          "root": { "type": ["string", "null"], "description": "Server root path, or null for proxied sites." },
+          "upstreams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["location", "port"],
+              "properties": {
+                "location": { "type": "string", "minLength": 1 },
+                "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

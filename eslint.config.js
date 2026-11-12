@@ -26,6 +26,7 @@ export default [
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         fetch: 'readonly',
+        structuredClone: 'readonly',
         // Browser (apps/manage)
         document: 'readonly',
         window: 'readonly'

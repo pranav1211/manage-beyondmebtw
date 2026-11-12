@@ -7,7 +7,12 @@ import { fileURLToPath } from 'node:url';
 import {
   validateRegistryEntry,
   validateArgusDeploy,
-  validateCatalogEntry
+  validateCatalogEntry,
+  validateOperationRequest,
+  validatePm2AppConfig,
+  validateNginxManifest,
+  validateConfigRepoManifest,
+  validateVersioned
 } from '../shared/schemas/index.js';
 import { loadConfig } from '../shared/config/index.js';
 
@@ -22,7 +27,13 @@ const checks = [
   ['fixtures/registry.invalid-unknown-key', () => validateRegistryEntry(read('tests/fixtures/registry.invalid-unknown-key.json')).valid, false],
   ['fixtures/declaration.valid', () => validateArgusDeploy(read('tests/fixtures/declaration.valid.json')).valid, true],
   ['fixtures/catalog.valid', () => validateCatalogEntry(read('tests/fixtures/catalog.valid.json')).valid, true],
-  ['fixtures/catalog.invalid-traversal', () => validateCatalogEntry(read('tests/fixtures/catalog.invalid-traversal.json')).valid, false]
+  ['fixtures/catalog.invalid-traversal', () => validateCatalogEntry(read('tests/fixtures/catalog.invalid-traversal.json')).valid, false],
+  // Stage 2 contract schemas.
+  ['fixtures/operation-request.valid', () => validateOperationRequest(read('tests/fixtures/operation-request.valid.json')).valid, true],
+  ['fixtures/pm2-app-config.valid', () => validatePm2AppConfig(read('tests/fixtures/pm2-app-config.valid.json')).valid, true],
+  ['fixtures/nginx-manifest.valid', () => validateNginxManifest(read('tests/fixtures/nginx-manifest.valid.json')).valid, true],
+  ['fixtures/config-repo-manifest.valid', () => validateConfigRepoManifest(read('tests/fixtures/config-repo-manifest.valid.json')).valid, true],
+  ['fixtures/config-repo-manifest.bad-version (rejected)', () => validateVersioned('configRepoManifest', read('tests/fixtures/config-repo-manifest.bad-version.json')).valid, false]
 ];
 
 let failures = 0;

@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/operation-record.json",
+  "title": "Operation status/result record (stored by Manage)",
+  "description": "Durable record of a requested operation and its outcome. Sanitized — never contains secret values, stack traces, or absolute server paths beyond what the result deliberately exposes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operationId", "operation", "application", "status", "createdAt"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "operationId": { "type": "string", "minLength": 1 },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "build", "deploy", "sync",
+        "pm2.reconcile", "pm2.start", "pm2.stop", "pm2.restart", "pm2.reload",
+        "nginx.validate", "nginx.apply", "health"
+      ]
+    },
+    "application": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "succeeded", "failed", "blocked"]
+    },
+    "stage": {
+      "type": ["string", "null"],
+      "enum": [
+        "identify", "load-config", "validate-declaration",
+        "sync", "deploy", "pm2-reconcile", "health-check", null
+      ]
+    },
+    "createdAt": { "type": "string", "minLength": 1, "description": "ISO 8601 timestamp." },
+    "finishedAt": { "type": ["string", "null"], "description": "ISO 8601 timestamp, or null while in flight." },
+    "result": { "type": ["object", "null"], "additionalProperties": true },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "details": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["code", "message"]
+    }
+  }
+}

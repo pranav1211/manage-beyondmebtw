@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/config-repo-manifest.json",
+  "title": "Config Repo manifest",
+  "description": "Top-level manifest of the bmb-infrastructure Config Repo: identity, config roots, and the owned-file map (PM2 by app, Nginx by host). Read and validated by Manage/Argus. No secret values; environment is referenced by variable name elsewhere.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "repository", "branch", "configRoots", "pm2", "nginx"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "repository": {
+      "type": "string",
+      "pattern": "^git@github\\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\.git$",
+      "description": "Git SSH URL; no embedded credentials."
+    },
+    "branch": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+    "revision": { "type": ["string", "null"], "description": "Optional config revision identifier." },
+    "configRoots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pm2", "nginx"],
+      "properties": {
+        "pm2": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" },
+        "nginx": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$" }
+      }
+    },
+    "pm2": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["application", "file", "managedByArgus"],
+        "properties": {
+          "application": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "file": {
+            "type": ["string", "null"],
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.config\\.js$",
+            "description": "Ecosystem filename, or null when Argus has not generated it yet (pending)."
+          },
+          "managedByArgus": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["pending", "generated"], "default": "pending" }
+        }
+      }
+    },
+    "nginx": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "file", "owner"],
+        "properties": {
+          "host": { "type": "string", "minLength": 1 },
+          "file": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.conf$" },
+          "owner": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+        }
+      }
+    },
+    "excluded": {
+      "type": "array",
+      "description": "Processes/apps explicitly outside the Argus-managed set (e.g. RTF).",
+      "items": { "type": "string" }
+    }
+  }
+}

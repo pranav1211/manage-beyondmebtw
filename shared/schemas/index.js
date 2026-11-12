@@ -4,21 +4,35 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
+import { AppError } from '../errors.js';
+import { SCHEMA_VERSION, isSupportedSchemaVersion } from './version.js';
 
 function loadSchema(name) {
   const url = new URL(`./${name}`, import.meta.url);
   return JSON.parse(readFileSync(fileURLToPath(url), 'utf8'));
 }
 
-const registrySchema = loadSchema('application-registry.schema.json');
-const argusDeploySchema = loadSchema('argus-deploy.schema.json');
-const catalogEntrySchema = loadSchema('catalog-entry.schema.json');
+const SCHEMA_FILES = Object.freeze({
+  registry: 'application-registry.schema.json',
+  argusDeploy: 'argus-deploy.schema.json',
+  catalogEntry: 'catalog-entry.schema.json',
+  operationRequest: 'operation-request.schema.json',
+  operationRecord: 'operation-record.schema.json',
+  argusEvent: 'argus-event.schema.json',
+  pm2AppConfig: 'pm2-app-config.schema.json',
+  nginxManifest: 'nginx-manifest.schema.json',
+  configRepoManifest: 'config-repo-manifest.schema.json'
+});
 
 const ajv = new Ajv({ allErrors: true, strict: false });
 
-const _validateRegistry = ajv.compile(registrySchema);
-const _validateArgusDeploy = ajv.compile(argusDeploySchema);
-const _validateCatalogEntry = ajv.compile(catalogEntrySchema);
+const compiled = {};
+const rawSchemas = {};
+for (const [key, file] of Object.entries(SCHEMA_FILES)) {
+  const schema = loadSchema(file);
+  rawSchemas[key] = schema;
+  compiled[key] = ajv.compile(schema);
+}
 
 function wrap(validateFn) {
   return (obj) => {
@@ -34,9 +48,40 @@ function wrap(validateFn) {
   };
 }
 
-export const validateRegistryEntry = wrap(_validateRegistry);
-export const validateArgusDeploy = wrap(_validateArgusDeploy);
-export const validateCatalogEntry = wrap(_validateCatalogEntry);
+// Existing (Stage 1) validators — unchanged signatures.
+export const validateRegistryEntry = wrap(compiled.registry);
+export const validateArgusDeploy = wrap(compiled.argusDeploy);
+export const validateCatalogEntry = wrap(compiled.catalogEntry);
+
+// New (Stage 2) validators.
+export const validateOperationRequest = wrap(compiled.operationRequest);
+export const validateOperationRecord = wrap(compiled.operationRecord);
+export const validateArgusEvent = wrap(compiled.argusEvent);
+export const validatePm2AppConfig = wrap(compiled.pm2AppConfig);
+export const validateNginxManifest = wrap(compiled.nginxManifest);
+export const validateConfigRepoManifest = wrap(compiled.configRepoManifest);
+
+// Generic access by key, for tooling/tests.
+export function getValidator(key) {
+  const fn = compiled[key];
+  if (!fn) throw new AppError('INTERNAL', `No validator for schema "${key}"`);
+  return wrap(fn);
+}
+
+/**
+ * Validate a versioned contract object: schema validity AND a supported
+ * `schemaVersion`. Returns {valid, errors}. Unsupported versions fail with a
+ * stable UNSUPPORTED_SCHEMA_VERSION-style error entry rather than a raw ajv one.
+ */
+export function validateVersioned(key, obj) {
+  if (obj && typeof obj === 'object' && 'schemaVersion' in obj && !isSupportedSchemaVersion(obj.schemaVersion)) {
+    return {
+      valid: false,
+      errors: [{ path: '/schemaVersion', keyword: 'version', message: `Unsupported schemaVersion ${obj.schemaVersion}` }]
+    };
+  }
+  return getValidator(key)(obj);
+}
 
 // Fields the repo-side declaration mirrors (checklist). `enabled` is registry-only.
 const DECLARATION_FIELDS = Object.freeze([
@@ -70,8 +115,6 @@ export function compareDeclaration(registryEntry, declaration) {
   return { match: mismatches.length === 0, mismatches };
 }
 
-export const schemas = Object.freeze({
-  registry: registrySchema,
-  argusDeploy: argusDeploySchema,
-  catalogEntry: catalogEntrySchema
-});
+export { SCHEMA_VERSION, isSupportedSchemaVersion };
+export const schemas = Object.freeze(rawSchemas);
+export const SCHEMA_FILE_NAMES = SCHEMA_FILES;

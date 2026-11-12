@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/argus-event.json",
+  "title": "Argus result/event (Argus -> Manage)",
+  "description": "A sanitized status update Argus returns to Manage for an in-flight or completed operation. No secret values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operationId", "status"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "operationId": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "succeeded", "failed", "blocked"]
+    },
+    "stage": {
+      "type": ["string", "null"],
+      "enum": [
+        "identify", "load-config", "validate-declaration",
+        "sync", "deploy", "pm2-reconcile", "health-check", null
+      ]
+    },
+    "result": { "type": ["object", "null"], "additionalProperties": true },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "details": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["code", "message"]
+    }
+  }
+}

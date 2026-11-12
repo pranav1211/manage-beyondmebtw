@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://manage.beyondmebtw.com/schemas/operation-request.json",
+  "title": "Argus operation request (Manage -> Argus)",
+  "description": "A typed request Manage sends to Argus's private API. No arbitrary command; `operation` is a closed enum. No secret values.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "application"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "build", "deploy", "sync",
+        "pm2.reconcile", "pm2.start", "pm2.stop", "pm2.restart", "pm2.reload",
+        "nginx.validate", "nginx.apply", "health"
+      ]
+    },
+    "application": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "requestId": { "type": "string", "minLength": 1 },
+    "params": {
+      "type": "object",
+      "description": "Operation-specific, non-secret parameters.",
+      "additionalProperties": true
+    }
+  }
+}

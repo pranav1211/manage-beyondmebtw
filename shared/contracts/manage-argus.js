@@ -8,6 +8,11 @@
 //   shell/command endpoint.
 // - Long-running operations return an operationId; Manage polls status.
 
+import { SCHEMA_VERSION } from '../schemas/version.js';
+
+// Contract schema version this build speaks (see shared/schemas/version.js).
+export const CONTRACT_SCHEMA_VERSION = SCHEMA_VERSION;
+
 // The explicit, closed set of Argus operations.
 export const ARGUS_OPERATIONS = Object.freeze([
   'build',
@@ -64,4 +69,15 @@ export const DEPLOY_STAGES = Object.freeze([
 
 export function isKnownOperation(op) {
   return ARGUS_OPERATIONS.includes(op);
+}
+
+/**
+ * Build a well-formed operation request envelope (stamped with the current
+ * schema version). Shape matches operation-request.schema.json. Does not
+ * validate — callers run it through validateOperationRequest.
+ */
+export function makeOperationRequest(operation, application, params) {
+  const req = { schemaVersion: CONTRACT_SCHEMA_VERSION, operation, application };
+  if (params !== undefined) req.params = params;
+  return req;
 }

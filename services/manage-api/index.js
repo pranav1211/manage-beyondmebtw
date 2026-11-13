@@ -24,7 +24,7 @@ export function createApp(config = loadConfig()) {
   });
 
   // Sanitized error boundary — never leak internals or secrets.
-  // eslint-disable-next-line no-unused-vars
+
   app.use((err, _req, res, _next) => {
     res.status(500).json(sanitizeError(err));
   });

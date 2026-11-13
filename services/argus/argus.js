@@ -213,7 +213,7 @@ export function createApp(config = loadConfig(), overrides = {}) {
     res.status(404).json({ code: ERROR_CODES.RESOURCE_NOT_FOUND, message: 'Not found' });
   });
 
-  // eslint-disable-next-line no-unused-vars
+
   app.use((err, _req, res, _next) => {
     res.status(statusFor(err)).json(sanitizeError(err));
   });

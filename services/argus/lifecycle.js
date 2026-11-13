@@ -7,7 +7,7 @@
 // Fail-fast: the first failing stage stops the operation and is recorded with
 // sanitized diagnostics. There is NO automatic rollback.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppError } from '../../shared/errors.js';
 import { validateArgusDeploy, compareDeclaration } from '../../shared/schemas/index.js';
@@ -35,6 +35,9 @@ const PROJECTS_PREFIX = '/projects/';
 
 export function createLifecycle(ctx) {
   const { store } = ctx;
+  // Argus owns its (isolated) projects root; establish it on first use so a
+  // first-ever Build on a fresh root works.
+  if (ctx.projectsRoot) mkdirSync(ctx.projectsRoot, { recursive: true });
 
   // Server-form `/projects/<app>` -> isolated local path under projectsRoot.
   function translateCwd(serverPath) {

@@ -4,9 +4,27 @@ Phase 3 rebuild of the Beyond Me backend. **Manage** is the control/data plane
 (authentication, application registry, canonical data, operation tracking) and
 hosts **Argus**, the single deployment/execution engine for all non‑RTF apps.
 
-> **Status: Stage 1 skeleton.** Structure, contracts, config and health only.
-> No production deployment behaviour is implemented yet. Argus runs in
-> local/test mode and performs **no** Git/PM2/Nginx/shell action.
+> **Status: Stage 3+4 (Argus execution) implemented and proved against an
+> isolated non-production target.** Argus execution is **disabled by default**;
+> it only runs with `ARGUS_EXECUTION_ENABLED=true` + `ARGUS_MODE=isolated-test`
+> and a non-production `PROJECTS_ROOT`. No production deployment has happened.
+> The Manage operational UI/API surface is Stage 5.
+
+## Argus (execution plane)
+
+`services/argus/` — webhook verification (per-target HMAC secret refs, default
+policy), registry-backed identification, per-app locks with latest-pending-commit
+coalescing, git sync (fixed argv, no shell), Argus-generated PM2 ecosystem files
+(env by name only), scoped Config Repo commit/push + remote read-back
+(`shared/config-repo` `persistOwnedFiles`), PM2 reconcile of the app's own
+processes only (unknown processes reported, never deleted), HTTP health gate,
+isolated `nginx -t` validate/apply, sanitized operation records. No rollback.
+
+Real end-to-end proof (non-production): `scripts/argus-proof.mjs` — needs
+`ARGUS_PROOF_ROOT` (scratch dir) and `CONFIG_REPO_ROOT` (a **disposable**
+bmb-infrastructure checkout on a proof branch). Real nginx tests run when
+`NGINX_BIN` points at an nginx binary; otherwise they skip. Set
+`ARGUS_TEST_TMP` to keep test scratch off a small system drive.
 
 ## Architecture boundary
 

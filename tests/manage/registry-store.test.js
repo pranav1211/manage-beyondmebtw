@@ -55,9 +55,13 @@ test('push failure leaves the change committed + pending, and retry pushes it', 
   assert.equal(r.persistence.pushed, false);
   assert.ok(s.get('app-two'), 'change is saved locally (visible as pending, not lost)');
   git(repo.checkout, ['remote', 'set-url', '--push', 'origin', repo.bare]);
+  const commitsBefore = git(repo.checkout, ['rev-list', '--count', 'HEAD']);
   const retry = await s.retryPush();
   assert.equal(retry.persistence.pushed, true);
-  assert.equal(retry.persistence.committed, false, 'retry creates no new commit');
+  assert.equal(retry.persistence.pending, false);
+  assert.equal(retry.persistence.commit, r.persistence.commit, 'retry pushes the SAME commit');
+  assert.equal(git(repo.checkout, ['rev-list', '--count', 'HEAD']), commitsBefore, 'retry creates no new commit');
+  assert.equal(git(repo.bare, ['rev-parse', 'main']), r.persistence.commit);
   assert.equal(JSON.parse(git(repo.bare, ['show', 'main:registry/applications.json'])).applications.length, 2);
 });
 

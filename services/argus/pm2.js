@@ -83,13 +83,30 @@ export async function disconnectPm2() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Inherited env vars that must never reach a managed process.
-export const FILTERED_ENV_PREFIXES = Object.freeze([
-  'ARGUS_INTERNAL_TOKEN',
-  'ARGUS_WEBHOOK_SECRET',
-  'WEBHOOK_DEFAULT_SECRET',
-  'MANAGE_SESSION_SECRET'
+// Managed apps inherit NOTHING from Argus's environment. PM2 builds an app's
+// env from the caller's process.env; with an array filter_env it copies the raw
+// caller env minus substring matches. When Argus itself runs under PM2 that env
+// carries Argus's own PM2 internals (pm_exec_path, pm_out_log_path, name, ...),
+// which PM2 then spreads over the new app's conf, so the "new" app runs Argus's
+// script (observed on the VM, Stage 5). A denylist cannot cover PM2's generic
+// key names, and filter_env: true is ignored on this code path (it checks
+// .length). [''] matches every key (every string includes ''), so the
+// inherited base is empty; the app gets only SYSTEM_ENV_KEYS + its declared env.
+// Secrets reach an app only via its own --env-file (path in node_args).
+export const FILTER_ALL_INHERITED_ENV = Object.freeze(['']);
+
+// Non-secret system basics an app needs to run (resolve binaries, locale, temp).
+export const SYSTEM_ENV_KEYS = Object.freeze([
+  'PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR',
+  // Windows (development only)
+  'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'USERPROFILE', 'ComSpec', 'PATHEXT'
 ]);
+
+function systemEnv(source = process.env) {
+  const out = {};
+  for (const k of SYSTEM_ENV_KEYS) if (typeof source[k] === 'string') out[k] = source[k];
+  return out;
+}
 
 /** Env var NAMES (never values) of a running process — for verification. */
 export async function envKeysOf(name) {
@@ -166,12 +183,12 @@ export async function reconcileApp({ application, ecosystem, translateCwd, secre
         instances: app.instances,
         autorestart: app.autorestart,
         max_restarts: app.max_restarts,
-        // Never let Argus's own credentials leak into a managed app's env
-        // (PM2 otherwise inherits the caller's environment).
-        filter_env: FILTERED_ENV_PREFIXES,
+        // Inherit nothing from Argus (credentials or PM2 internals); see
+        // FILTER_ALL_INHERITED_ENV.
+        filter_env: FILTER_ALL_INHERITED_ENV,
         // e.g. --env-file=/infrastructure/env/<app>.env (path only).
         ...(app.node_args ? { node_args: app.node_args } : {}),
-        env: { ...app.env, ...secretEnv, ARGUS_CONFIG_HASH: configHash, ARGUS_REVISION: revision }
+        env: { ...systemEnv(), ...app.env, ...secretEnv, ARGUS_CONFIG_HASH: configHash, ARGUS_REVISION: revision }
       };
       const current = before.find((p) => p.name === app.name);
       let action;

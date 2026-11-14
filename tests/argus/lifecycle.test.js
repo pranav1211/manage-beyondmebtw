@@ -50,6 +50,25 @@ let s;
 let staticBase;
 const auth = { authorization: `Bearer ${TOKEN}` };
 
+// Make this process look like Argus running UNDER PM2 (as on the VM): PM2
+// injects its internals into the managed process env, and Argus's own
+// credentials sit in process.env via --env-file. None of it may reach a managed
+// app — in particular pm_exec_path must not make the new app run Argus's script.
+const POISON_SCRIPT = join(root, 'poison-argus.js');
+writeFileSync(POISON_SCRIPT, 'process.exit(1);\n');
+const POISON_ENV = {
+  pm_id: '99',
+  name: 'argus',
+  pm_exec_path: POISON_SCRIPT,
+  pm_cwd: root,
+  pm_out_log_path: join(root, 'poison-out.log'),
+  pm_err_log_path: join(root, 'poison-err.log'),
+  ARGUS_INTERNAL_TOKEN: TOKEN,
+  CALLER_ONLY_SENTINEL: 'must-not-leak'
+};
+const savedEnv = {};
+for (const [k, v] of Object.entries(POISON_ENV)) { savedEnv[k] = process.env[k]; process.env[k] = v; }
+
 before(async () => {
   await new Promise((r) => staticServer.listen(0, '127.0.0.1', r));
   staticBase = `http://127.0.0.1:${staticServer.address().port}`;
@@ -86,6 +105,7 @@ after(async () => {
   await step('stop test pm2 daemon', async () => killPm2Daemon(process.env.PM2_HOME));
   await step('close argus', () => s.close());
   await step('close static', () => { staticServer.closeAllConnections(); return new Promise((r) => staticServer.close(r)); });
+  for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
 });
 
 async function webhook(application, commit, secret = SECRET) {
@@ -132,6 +152,9 @@ test('node deploy via signed webhook: generate → commit/push → read-back →
   const keys = await envKeysOf('node-ok');
   assert.ok(!keys.includes('ARGUS_INTERNAL_TOKEN'));
   assert.ok(!keys.some((k) => k.startsWith('ARGUS_WEBHOOK_SECRET')));
+  assert.ok(!keys.includes('CALLER_ONLY_SENTINEL'), 'nothing from the caller env is inherited');
+  const [proc] = await pm2Describe(['node-ok']);
+  assert.ok(!JSON.stringify(proc).includes(POISON_SCRIPT), 'Argus\'s own PM2 internals never reach the app');
   assert.equal((await fetch('http://127.0.0.1:47101/health')).status, 200);
 });
 

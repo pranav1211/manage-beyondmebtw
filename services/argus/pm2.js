@@ -237,11 +237,21 @@ export async function reconcileApp({ application, ecosystem, translateCwd, secre
       }
     }
 
+    // Persist PM2's process list (= `pm2 save`) whenever a definition changed, so a
+    // reboot resurrects exactly what Argus deployed — e.g. with its --env-file.
+    // Without this, a stale saved definition comes back on boot (found live, Stage 8).
+    let persisted = false;
+    if (actions.some((a) => a.action === 'started' || a.action === 'recreated')) {
+      await call((cb) => pm2.dump(cb));
+      persisted = true;
+    }
+
     const owned = new Set(actions.map((a) => a.name));
     const others = after.filter((p) => !owned.has(p.name)).map(summarize);
     return {
       actions,
       actual,
+      persisted,
       otherManaged: others.filter((p) => managedNames.has(p.name)).map((p) => p.name),
       bootstrap: others.filter((p) => bootstrapNames.has(p.name)).map((p) => ({ name: p.name, status: p.status })),
       unmanaged: others

@@ -148,6 +148,13 @@ test('node deploy via signed webhook: generate → commit/push → read-back →
   const manifest = JSON.parse(git(cfgRepo.bare, ['show', 'HEAD:infrastructure/config/manifest.json']));
   assert.equal(manifest.pm2.find((p) => p.application === 'node-ok').status, 'generated');
 
+  // The started definition is persisted (pm2 save), so a reboot resurrects it.
+  assert.equal(rec.result.pm2.persisted, true);
+  const dump = JSON.parse(readFileSync(join(process.env.PM2_HOME, 'dump.pm2'), 'utf8'));
+  const saved = dump.find((p) => p.name === 'node-ok');
+  assert.ok(saved, 'node-ok is in the saved PM2 list');
+  assert.equal(saved.env.ARGUS_REVISION, head, 'saved definition is the one just deployed');
+
   // Argus's own credentials never reach the managed process environment.
   const keys = await envKeysOf('node-ok');
   assert.ok(!keys.includes('ARGUS_INTERNAL_TOKEN'));

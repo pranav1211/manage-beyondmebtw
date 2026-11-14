@@ -32,13 +32,13 @@ test('manage-api: /health is ok', async () => {
   }
 });
 
-test('manage-api: v1 route scaffold returns 501 NOT_IMPLEMENTED', async () => {
+test('manage-api: v1 routes require an authenticated session (401)', async () => {
   const { base, close } = await serve(createManageApp(cfg));
   try {
     const res = await fetch(`${base}/api/v1/home`);
-    assert.equal(res.status, 501);
+    assert.equal(res.status, 401);
     const body = await res.json();
-    assert.equal(body.code, 'NOT_IMPLEMENTED');
+    assert.equal(body.code, 'UNAUTHENTICATED');
   } finally {
     await close();
   }
@@ -47,7 +47,7 @@ test('manage-api: v1 route scaffold returns 501 NOT_IMPLEMENTED', async () => {
 test('manage-api: unknown route returns 404', async () => {
   const { base, close } = await serve(createManageApp(cfg));
   try {
-    const res = await fetch(`${base}/nope`);
+    const res = await fetch(`${base}/api/unknown`);
     assert.equal(res.status, 404);
   } finally {
     await close();

@@ -133,6 +133,17 @@ export function signedPush({ fullName, ref = 'refs/heads/main', after, secret })
   return { body, sig };
 }
 
+/** An EMPTY (unborn, no commits) data repo origin + a checkout of it on main. */
+export function makeEmptyDataRepo() {
+  const base = tmp('data-');
+  const bare = join(base, 'origin.git');
+  const checkout = join(base, 'checkout');
+  git(base, ['init', '-q', '--bare', '-b', 'main', bare]);
+  git(base, ['clone', '-q', bare, checkout]);
+  git(checkout, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  return { base, bare, checkout };
+}
+
 /** Stop the (isolated, test) PM2 daemon out-of-process via the PM2 CLI. */
 export function killPm2Daemon(pm2Home) {
   const bin = fileURLToPath(new URL('../../node_modules/pm2/bin/pm2', import.meta.url));

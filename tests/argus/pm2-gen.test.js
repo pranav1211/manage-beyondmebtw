@@ -42,3 +42,12 @@ test('static apps and missing runtime are rejected', () => {
   assert.throws(() => buildPm2Metadata(s, declarationFor(s)), (e) => e.code === 'VALIDATION_FAILED');
   assert.throws(() => buildPm2Metadata(entry, declarationFor(entry)), (e) => e.code === 'VALIDATION_FAILED');
 });
+
+test('envFile: generated config passes only the env-file PATH via node --env-file', () => {
+  const d = declarationFor(entry, { script: 'server.js', port: 47101, healthPath: '/health', envFile: true });
+  const text = renderEcosystem(buildPm2Metadata(entry, d));
+  assert.match(text, /"--env-file=\/infrastructure\/env\/node-ok\.env"/);
+  const { ecosystem } = parseEcosystem(text);
+  assert.deepEqual(ecosystem.apps[0].node_args, ['--env-file=/infrastructure/env/node-ok.env']);
+  assert.ok(!('MANAGE_SESSION_SECRET' in ecosystem.apps[0].env));
+});

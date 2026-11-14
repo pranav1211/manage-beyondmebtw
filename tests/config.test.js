@@ -5,7 +5,7 @@ import { loadConfig } from '../shared/config/index.js';
 test('loads non-secret defaults in local mode', () => {
   const cfg = loadConfig({ env: {} });
   assert.equal(cfg.nodeEnv, 'development');
-  assert.equal(cfg.manageApiPort, 7000);
+  assert.equal(cfg.manageApiPort, 7100);
   assert.equal(cfg.argusPort, 6040);
   assert.equal(cfg.argusBind, '127.0.0.1');
   assert.equal(cfg.isProd, false);

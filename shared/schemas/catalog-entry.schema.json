@@ -27,8 +27,8 @@
     },
     "path": {
       "type": "string",
-      "description": "Relative path under the root. No absolute paths, no traversal.",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+      "description": "Relative path under the root. No absolute paths, no traversal. A collection uses exactly one \"{id}\" in its file name.",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9._/-]|\\{id\\})*$",
       "not": {
         "pattern": "(^|/)\\.\\.(/|$)"
       }
@@ -87,6 +87,8 @@
         "enum": [
           "read",
           "replace",
+          "create",
+          "delete",
           "create-item",
           "update-item",
           "delete-item"
@@ -141,6 +143,20 @@
     "notes": {
       "type": "string",
       "maxLength": 1000
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idPattern"
+      ],
+      "description": "A family of documents: member key = \"<key>.<id>\", file = path with {id}. Members are created/deleted through the API (operations \"create\"/\"delete\").",
+      "properties": {
+        "idPattern": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
     }
   }
 }

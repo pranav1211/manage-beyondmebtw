@@ -67,5 +67,10 @@ export const api = {
   dataRetry: (id) => call('POST', `/data/operations/${encodeURIComponent(id)}/retry`, {}),
   dataCompare: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}/compare`),
   dataResource: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}`),
-  dataReplace: (key, data, ifRevision) => call('PUT', `/data/resources/${encodeURIComponent(key)}`, { data, ifRevision })
+  dataReplace: (key, data, ifRevision) => call('PUT', `/data/resources/${encodeURIComponent(key)}`, { data, ifRevision }),
+  appEnv: (app) => call('GET', `/apps/${encodeURIComponent(app)}/env`),
+  setAppEnv: (app, body) => call('PUT', `/apps/${encodeURIComponent(app)}/env`, body),
+  appToken: (app) => call('GET', `/apps/${encodeURIComponent(app)}/token`),
+  issueAppToken: (app, body) => call('POST', `/apps/${encodeURIComponent(app)}/token`, body),
+  revokeAppToken: (app) => call('DELETE', `/apps/${encodeURIComponent(app)}/token?restart=true`)
 };

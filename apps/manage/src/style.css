@@ -121,3 +121,5 @@ pre.json {
   .view { padding: 14px; }
   th:nth-child(n+4), td:nth-child(n+4) { display: none; }
 }
+
+code.secret { display: block; margin-top: 6px; word-break: break-all; user-select: all; }

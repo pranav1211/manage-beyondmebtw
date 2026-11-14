@@ -17,6 +17,8 @@ import { createRegistryStore } from './registry-store.js';
 import { createResourceStore } from './resource-store.js';
 import { createDataWebhookHandler, fullNameOf } from './data-webhook.js';
 import { createDataRepo } from '../../shared/data/data-repo.js';
+import { createApiClients } from './api-clients.js';
+import { createEnvStore } from './env-store.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST = join(REPO_ROOT, 'apps', 'manage', 'dist');
@@ -61,6 +63,8 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
     });
   const registry = deps.registry || createRegistryStore({ dataRepo, expectedRemote: config.manage.dataRepoRemote });
   const resources = deps.resources || createResourceStore({ dataRepo, sourceRoots: config.manage.sourceRoots });
+  const apiClients = deps.apiClients || createApiClients({ dataRepo });
+  const envStore = deps.envStore || createEnvStore({ envRoot: config.manage.envRoot });
   app.locals.dataRepo = dataRepo;
 
   // bmb-data webhook: raw body (exact signed bytes), before any JSON parser/session gate.
@@ -85,6 +89,9 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       registry,
       resources,
       dataRepo,
+      apiClients,
+      envStore,
+      appApiUrl: `http://127.0.0.1:${config.manageApiPort}/api/v1`,
       secureCookies: config.manage.secureCookies,
       env: config.nodeEnv
     })

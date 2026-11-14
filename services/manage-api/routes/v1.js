@@ -8,6 +8,7 @@ import { AppError, ERROR_CODES, sanitizeError } from '../../../shared/errors.js'
 import { ARGUS_OPERATIONS } from '../../../shared/contracts/manage-argus.js';
 import { validateRegistryEntry } from '../../../shared/schemas/index.js';
 import { verifyPassword, parseCookies, sessionCookie, SESSION_COOKIE } from '../auth.js';
+import { scopeAllows } from '../api-clients.js';
 
 export const GLOBAL_RECONCILE_CONFIRMATION = 'RECONCILE ALL ELIGIBLE APPS';
 export const PUBLIC_ORIGIN_RE = /^https:\/\/([a-z0-9-]+\.)*beyondmebtw\.com$/;
@@ -55,10 +56,13 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * @param {object} deps.registry registry-store instance
  * @param {object} [deps.resources] resource-store instance (canonical data)
  * @param {object} [deps.dataRepo] shared bmb-data DataRepo
+ * @param {object} [deps.apiClients] per-application API tokens
+ * @param {object} [deps.envStore] /infrastructure/env/<app>.env writer
+ * @param {string} [deps.appApiUrl] Manage API base apps use (loopback)
  * @param {boolean} deps.secureCookies
  * @param {string} deps.env node env label
  */
-export function createV1Router({ sessions, limiter, passwordHash, argus, registry, resources, dataRepo, secureCookies, env }) {
+export function createV1Router({ sessions, limiter, passwordHash, argus, registry, resources, dataRepo, apiClients, envStore, appApiUrl = 'http://127.0.0.1:7100/api/v1', secureCookies, env }) {
   const router = express.Router();
   // Canonical documents can be larger than control-plane requests.
   router.use('/data', express.json({ limit: '2mb', strict: true }));
@@ -106,15 +110,81 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
       }
       next();
     });
+    // Who is calling: an application with its Manage-issued token (Bearer,
+    // no cookie, no CSRF), the admin (session + CSRF on writes), or anonymous.
+    router.use('/data', (req, _res, next) => {
+      const h = String(req.get('authorization') || '');
+      if (h.startsWith('Bearer ')) {
+        const client = apiClients ? apiClients.verify(h.slice(7).trim()) : null;
+        if (!client) return next(new AppError('UNAUTHENTICATED', 'Invalid or revoked API token'));
+        req.principal = { kind: 'client', client };
+        return next();
+      }
+      const s = sessionOf(req);
+      if (s) {
+        if (MUTATING.has(req.method) && !sessions.checkCsrf(s, req.get('x-csrf-token'))) {
+          return next(new AppError('FORBIDDEN', 'Missing or invalid CSRF token'));
+        }
+        req.principal = { kind: 'admin' };
+        req.session = s;
+        return next();
+      }
+      req.principal = { kind: 'anonymous' };
+      return next();
+    });
+    const writer = (req, _res, next) =>
+      next(req.principal.kind === 'anonymous' ? new AppError('UNAUTHENTICATED', 'Authentication required (API token or admin session)') : undefined);
+    const opts = (req) => ({
+      principal: req.principal,
+      ifRevision: req.body && req.body.ifRevision !== undefined ? req.body.ifRevision : undefined,
+      idempotencyKey: req.get('idempotency-key') ? String(req.get('idempotency-key')).slice(0, 128) : undefined
+    });
+    // 200 = saved (on GitHub, read back); 202 = committed locally, push pending.
+    const send = (res, out) => {
+      const st = out.persistence.status;
+      if (st === 'blocked' || st === 'failed') {
+        const e = out.persistence.error || {};
+        throw new AppError(e.code || 'OPERATION_FAILED', e.message || 'Data operation did not complete', { operationId: out.persistence.operationId, status: st });
+      }
+      res.status(st === 'pending-push' ? 202 : 200).json(out);
+    };
+    const bodyOf = (req, field, { optional = false } = {}) => {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const unknown = Object.keys(body).filter((k) => k !== field && k !== 'ifRevision');
+      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
+      if (!optional && body[field] === undefined) throw new AppError('VALIDATION_FAILED', `"${field}" is required`);
+      return body[field];
+    };
+
     router.get('/data/resources', (req, res) => {
-      res.json({ resources: resources.list({ admin: Boolean(sessionOf(req)) }) });
+      res.json({ resources: resources.list(req.principal) });
     });
     router.get('/data/resources/:key', (req, res) => {
-      res.json(resources.read(req.params.key, { admin: Boolean(sessionOf(req)) }));
+      res.json(resources.read(req.params.key, req.principal));
     });
     router.get('/data/resources/:key/items/:id', (req, res) => {
-      res.json(resources.readItem(req.params.key, req.params.id, { admin: Boolean(sessionOf(req)) }));
+      res.json(resources.readItem(req.params.key, req.params.id, req.principal));
     });
+    router.put('/data/resources/:key', writer, wrap(async (req, res) => {
+      send(res, await resources.replace(req.params.key, bodyOf(req, 'data'), opts(req)));
+    }));
+    router.delete('/data/resources/:key', writer, wrap(async (req, res) => {
+      bodyOf(req, 'none', { optional: true });
+      send(res, await resources.remove(req.params.key, opts(req)));
+    }));
+    router.post('/data/resources/:key/items', writer, wrap(async (req, res) => {
+      send(res, await resources.createItem(req.params.key, bodyOf(req, 'item'), opts(req)));
+    }));
+    router.put('/data/resources/:key/items/:id', writer, wrap(async (req, res) => {
+      send(res, await resources.updateItem(req.params.key, req.params.id, bodyOf(req, 'item'), opts(req)));
+    }));
+    router.delete('/data/resources/:key/items/:id', writer, wrap(async (req, res) => {
+      bodyOf(req, 'none', { optional: true });
+      send(res, await resources.deleteItem(req.params.key, req.params.id, opts(req)));
+    }));
+    router.post('/data/transactions', writer, wrap(async (req, res) => {
+      send(res, await resources.transaction(bodyOf(req, 'changes'), opts(req)));
+    }));
   }
 
   // Everything below: admin session required (+ CSRF on mutations).
@@ -247,44 +317,94 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     res.status(202).json({ results, skipped });
   }));
 
-  // ── Canonical data: admin writes, comparison, operations ───────────────
-  if (resources && dataRepo) {
-    const opts = (req) => ({
-      ifRevision: req.body && req.body.ifRevision !== undefined ? req.body.ifRevision : undefined,
-      idempotencyKey: req.get('idempotency-key') ? String(req.get('idempotency-key')).slice(0, 128) : undefined
-    });
-    // 200 = saved (on GitHub, read back); 202 = committed locally, push pending.
-    const send = (res, out) => res.status(out.persistence.status === 'pending-push' ? 202 : 200).json(out);
-    const opError = (out) => {
-      if (out.persistence.status === 'blocked' || out.persistence.status === 'failed') {
-        const e = out.persistence.error || {};
-        throw new AppError(e.code || 'OPERATION_FAILED', e.message || 'Data operation did not complete', { operationId: out.persistence.operationId, status: out.persistence.status });
-      }
-      return out;
-    };
-    const bodyOf = (req, field) => {
-      if (!req.body || typeof req.body !== 'object') throw new AppError('VALIDATION_FAILED', 'JSON body required');
-      const unknown = Object.keys(req.body).filter((k) => k !== field && k !== 'ifRevision');
-      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
-      if (req.body[field] === undefined) throw new AppError('VALIDATION_FAILED', `"${field}" is required`);
-      return req.body[field];
-    };
+  // ── Per-application env + Manage API token (admin) ──────────────────────
+  // Env lives in /infrastructure/env/<application>.env (loaded by the app with
+  // node --env-file). Values are write-only here. Issuing a token writes
+  // MANAGE_API_TOKEN/MANAGE_API_URL into that file; restart:true asks Argus to
+  // restart the app so it picks the env up.
+  const registered = (app) => {
+    const entry = registry.get(String(app));
+    if (!entry) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
+    return entry;
+  };
+  const restartApp = async (entry, wanted) => {
+    if (!wanted) return null;
+    if (entry.type !== 'node') return { skipped: 'static application (no process)' };
+    try {
+      return await argus.submit('pm2.restart', entry.application);
+    } catch (err) {
+      return { refused: true, error: sanitizeError(err) };
+    }
+  };
+  const ENV_BODY = ['set', 'unset', 'restart'];
 
-    router.put('/data/resources/:key', wrap(async (req, res) => {
-      send(res, opError(await resources.replace(req.params.key, bodyOf(req, 'data'), opts(req))));
+  if (envStore) {
+    router.get('/apps/:app/env', (req, res) => {
+      res.json(envStore.list(registered(req.params.app).application));
+    });
+    router.put('/apps/:app/env', wrap(async (req, res) => {
+      const entry = registered(req.params.app);
+      const body = req.body || {};
+      const unknown = Object.keys(body).filter((k) => !ENV_BODY.includes(k));
+      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
+      const env = envStore.update(entry.application, { set: body.set || {}, unset: body.unset || [] });
+      res.json({ env, restart: await restartApp(entry, body.restart === true) });
     }));
-    router.post('/data/resources/:key/items', wrap(async (req, res) => {
-      send(res, opError(await resources.createItem(req.params.key, bodyOf(req, 'item'), opts(req))));
+  }
+
+  if (apiClients && envStore) {
+    // What this token can reach: concrete resources and collections ("<key>.{id}").
+    const endpointsFor = (scopes) => {
+      const grant = (key) => (scopeAllows(scopes, key, 'write') ? 'read-write' : scopeAllows(scopes, key, 'read') ? 'read' : null);
+      const all = resources ? resources.list({ kind: 'client', client: { scopes } }) : [];
+      return {
+        base: `${appApiUrl}/data/resources/`,
+        resources: all.filter((r) => r.status !== 'collection' && !r.collection && grant(r.key)).map((r) => ({ key: r.key, access: grant(r.key) })),
+        collections: all.filter((r) => r.status === 'collection' && grant(`${r.key}.x`)).map((r) => ({ key: `${r.key}.{id}`, access: grant(`${r.key}.x`) }))
+      };
+    };
+    router.get('/apps/:app/token', (req, res) => {
+      const entry = registered(req.params.app);
+      const client = apiClients.list().find((c) => c.application === entry.application && !c.revoked) || null;
+      res.json({ client, ...(client ? { endpoints: endpointsFor(client.scopes) } : {}) });
+    });
+    router.post('/apps/:app/token', wrap(async (req, res) => {
+      const entry = registered(req.params.app);
+      const body = req.body || {};
+      const unknown = Object.keys(body).filter((k) => !['scopes', 'description', 'restart'].includes(k));
+      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
+      envStore.list(entry.application); // refuses control-plane apps before anything is issued
+      const issued = await apiClients.issueForApp(entry.application, body.scopes, body.description || '');
+      const env = envStore.update(
+        entry.application,
+        { set: { MANAGE_API_TOKEN: issued.token, MANAGE_API_URL: appApiUrl } },
+        { allowManaged: true }
+      );
+      res.status(201).json({
+        client: issued.client,
+        // Shown once. Already written to the app's env file by Manage.
+        token: issued.token,
+        writtenTo: env.file,
+        endpoints: endpointsFor(issued.client.scopes),
+        persistence: issued.persistence,
+        restart: await restartApp(entry, body.restart === true)
+      });
     }));
-    router.put('/data/resources/:key/items/:id', wrap(async (req, res) => {
-      send(res, opError(await resources.updateItem(req.params.key, req.params.id, bodyOf(req, 'item'), opts(req))));
+    router.delete('/apps/:app/token', wrap(async (req, res) => {
+      const entry = registered(req.params.app);
+      const client = apiClients.list().find((c) => c.application === entry.application && !c.revoked);
+      if (!client) throw new AppError('RESOURCE_NOT_FOUND', 'No active token for this application');
+      const out = await apiClients.revoke(client.id);
+      const env = envStore.update(entry.application, { unset: ['MANAGE_API_TOKEN', 'MANAGE_API_URL'] }, { allowManaged: true });
+      res.json({ ...out, env, restart: await restartApp(entry, req.query.restart === 'true') });
     }));
-    router.delete('/data/resources/:key/items/:id', wrap(async (req, res) => {
-      send(res, opError(await resources.deleteItem(req.params.key, req.params.id, opts(req))));
-    }));
-    router.post('/data/transactions', wrap(async (req, res) => {
-      send(res, opError(await resources.transaction(bodyOf(req, 'changes'), opts(req))));
-    }));
+    router.get('/clients', (_req, res) => {
+      res.json({ clients: apiClients.list() });
+    });
+  }
+
+  // ── Canonical data: admin-only views ────────────────────────────────────
+  if (resources && dataRepo) {
     router.get('/data/resources/:key/compare', (req, res) => {
       res.json(resources.compare(req.params.key));
     });

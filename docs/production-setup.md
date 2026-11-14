@@ -99,8 +99,28 @@ bmb-data override: `BMB_DATA_WEBHOOK_SECRET`). A push to `manage-beyondmebtw`
 - A failed push = `pending-push` (HTTP 202, not "saved"); retry from the Data
   page or `POST /api/v1/data/operations/:id/retry`. Divergence = `blocked`; fix
   by hand (never reset/force automatically).
-- Comparison mode needs read-only source checkouts in `manage-beyondmebtw.env`:
-  `DATA_SOURCE_ROOTS=pranav1211/Beyondmebtw=/bmbsifi/Beyondmebtw;pranav1211/PhotosBMB=/proj/photos`
+## Applications: data access and env (dashboard → Applications → <app>)
+
+- **Env:** every app's env lives in `/infrastructure/env/<application>.env`
+  (0600). The app loads it at start (`node --env-file`, set in its
+  Argus-generated PM2 config when `argus.deploy.json` has `runtime.envFile: true`).
+  The dashboard adds/changes/removes variables (values are write-only) and can
+  ask Argus to restart the app. `argus.env` and `manage-beyondmebtw.env` are
+  control-plane files and are only edited by hand.
+- **Manage API token:** "Issue token" creates a per-app token scoped to
+  resource keys or families (`f1.season.*`, read and/or write) and Manage writes
+  `MANAGE_API_TOKEN` + `MANAGE_API_URL` (`http://127.0.0.1:7100/api/v1`) into
+  that app's env file. Only the token's SHA-256 is kept
+  (`bmb-data/registry/api-clients.json`). Rotating replaces it; revoking removes
+  it from the env file.
+- **Using it from an app:** `Authorization: Bearer $MANAGE_API_TOKEN` on
+  `GET|PUT|DELETE $MANAGE_API_URL/data/resources/<key>` (and `/items/<id>`).
+  Send `ifRevision` (from the last read) on writes; a 409 means someone else
+  changed it. 200 = saved and on GitHub; 202 = committed, push pending.
+- **Collections:** a catalog entry with `collection.idPattern` and `{id}` in its
+  path is a family of documents (`f1.season.<year>` → `data/f1ta/<year>.json`);
+  apps create members with `PUT` and remove them with `DELETE`.
+- Public resources stay readable without a token (CORS for `*.beyondmebtw.com`).
 
 ## Operational notes (learned establishing Stage 5 live)
 

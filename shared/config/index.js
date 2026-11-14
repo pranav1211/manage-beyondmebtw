@@ -188,6 +188,8 @@ export function loadConfig({ env = process.env, requireSecrets, service } = {}) 
       stateRoot: env.MANAGE_STATE_ROOT || join(pathRoots.logs, 'manage'),
       // Read-only source checkouts for comparison mode: "owner/repo=/abs/path;..."
       sourceRoots: parseSourceRoots(env.DATA_SOURCE_ROOTS),
+      // Per-application env files Manage writes (dashboard envs + API token).
+      envRoot: env.MANAGE_ENV_ROOT || '/infrastructure/env',
       secureCookies: isProd
     }),
     nodeEnv,

@@ -146,6 +146,119 @@ const ACTIONS = [
   { op: 'health', label: 'Health check', confirm: false }
 ];
 
+// ── per-application env + Manage API token ──────────────────────────────────
+function restartNote(r) {
+  if (!r) return '';
+  if (r.refused) return ` Restart refused: ${esc(r.error && r.error.code)}.`;
+  if (r.skipped) return ` (${esc(r.skipped)})`;
+  return ` Restart requested — <a href="#/ops/${encodeURIComponent(r.operationId)}">follow it</a>.`;
+}
+
+async function envAndToken(entry) {
+  const envBox = document.getElementById('env-section');
+  const tokBox = document.getElementById('token-section');
+  const app = entry.application;
+
+  const drawEnv = async (note = '') => {
+    let env;
+    try {
+      env = await api.appEnv(app);
+    } catch (err) {
+      envBox.innerHTML = errorBanner(err);
+      return;
+    }
+    envBox.innerHTML = `${note}
+      <p class="muted">Values are write-only: they are never shown again. The app loads this file at start (node --env-file).</p>
+      <table><thead><tr><th>Name</th><th></th></tr></thead><tbody>
+      ${env.keys.map((k) => `<tr><td><code>${esc(k.name)}</code> ${k.managedByManage ? badge('ok', 'written by Manage') : ''}</td><td>${k.managedByManage ? '' : `<button class="btn ghost" data-unset="${esc(k.name)}">Remove</button>`}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">No variables yet.</td></tr>'}
+      </tbody></table>
+      <form class="stack" id="env-form">
+        <div class="row"><label>Name <input name="name" required pattern="[A-Z_][A-Z0-9_]*" placeholder="SITE_PASSWORD_HASH" /></label>
+        <label>Value <input name="value" type="password" autocomplete="off" required /></label></div>
+        <label class="row"><input type="checkbox" name="restart" checked /> Restart the app afterwards</label>
+        <button class="btn primary" type="submit">Set variable</button>
+      </form>`;
+    envBox.querySelector('#env-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      try {
+        const r = await api.setAppEnv(app, { set: { [String(f.get('name'))]: String(f.get('value')) }, restart: f.get('restart') === 'on' });
+        drawEnv(`<div class="banner info">Saved ${esc(f.get('name'))}.${restartNote(r.restart)}</div>`);
+      } catch (err) {
+        envBox.insertAdjacentHTML('afterbegin', errorBanner(err));
+      }
+    });
+    envBox.querySelectorAll('[data-unset]').forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (!window.confirm(`Remove ${b.dataset.unset} from ${app}.env and restart the app?`)) return;
+        try {
+          const r = await api.setAppEnv(app, { unset: [b.dataset.unset], restart: true });
+          drawEnv(`<div class="banner info">Removed ${esc(b.dataset.unset)}.${restartNote(r.restart)}</div>`);
+        } catch (err) {
+          envBox.insertAdjacentHTML('afterbegin', errorBanner(err));
+        }
+      })
+    );
+  };
+
+  const drawToken = async (note = '') => {
+    let t;
+    try {
+      t = await api.appToken(app);
+    } catch (err) {
+      tokBox.innerHTML = errorBanner(err);
+      return;
+    }
+    const c = t.client;
+    const scopes = c ? c.scopes : [{ resource: 'key.or.prefix.*', access: ['read', 'write'] }];
+    tokBox.innerHTML = `${note}
+      ${c ? `<dl class="kv"><dt>Client</dt><dd><code>${esc(c.id)}</code> · issued ${time(c.issuedAt)}</dd>
+        <dt>Endpoint base</dt><dd><code>${esc(t.endpoints.base)}</code></dd>
+        <dt>Resources</dt><dd>${[...t.endpoints.resources, ...t.endpoints.collections].map((r) => `<code>${esc(r.key)}</code> ${badge(r.access === 'read-write' ? 'ok' : 'unknown', r.access)}`).join('<br>') || '—'}</dd></dl>`
+        : '<p class="muted">No token yet. Issuing one writes MANAGE_API_TOKEN and MANAGE_API_URL into this app’s env file.</p>'}
+      <form class="stack" id="token-form">
+        <label>Scopes (JSON: resource key or "prefix.*", access read/write)
+          <textarea name="scopes" rows="5" spellcheck="false">${esc(JSON.stringify(scopes, null, 2))}</textarea></label>
+        <label class="row"><input type="checkbox" name="restart" checked /> Restart the app afterwards</label>
+        <div class="row"><button class="btn primary" type="submit">${c ? 'Rotate token (old one stops working)' : 'Issue token'}</button>
+        ${c ? '<button class="btn danger" type="button" id="revoke">Revoke</button>' : ''}</div>
+      </form>`;
+    tokBox.querySelector('#token-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      let parsed;
+      try {
+        parsed = JSON.parse(String(f.get('scopes')));
+      } catch {
+        tokBox.insertAdjacentHTML('afterbegin', '<div class="banner bad">Scopes are not valid JSON.</div>');
+        return;
+      }
+      try {
+        const r = await api.issueAppToken(app, { scopes: parsed, restart: f.get('restart') === 'on' });
+        drawToken(`<div class="banner info">Token written to <code>${esc(r.writtenTo)}</code>.${restartNote(r.restart)}
+          <details><summary>Show token once (for use outside this server)</summary><code class="secret">${esc(r.token)}</code></details></div>`);
+        drawEnv();
+      } catch (err) {
+        tokBox.insertAdjacentHTML('afterbegin', errorBanner(err));
+      }
+    });
+    const rv = tokBox.querySelector('#revoke');
+    if (rv) rv.addEventListener('click', async () => {
+      if (!window.confirm(`Revoke ${app}'s Manage API token? The app loses data access.`)) return;
+      try {
+        const r = await api.revokeAppToken(app);
+        drawToken(`<div class="banner warn">Token revoked.${restartNote(r.restart)}</div>`);
+        drawEnv();
+      } catch (err) {
+        tokBox.insertAdjacentHTML('afterbegin', errorBanner(err));
+      }
+    });
+  };
+
+  drawEnv();
+  drawToken();
+}
+
 async function appDetail(name) {
   const [{ entry, status }, ops] = await Promise.all([api.app(name), api.operations(name, 15).catch(() => null)]);
   const st = status || {};
@@ -196,8 +309,13 @@ async function appDetail(name) {
       <a class="btn ghost" href="#/registry/${encodeURIComponent(entry.application)}/edit">Edit registry entry</a>
     </div>
     <div id="action-result"></div>
+    <h2>Environment <span class="muted">/infrastructure/env/${esc(entry.application)}.env</span></h2>
+    <div id="env-section"><p class="muted">Loading…</p></div>
+    <h2>Manage API token</h2>
+    <div id="token-section"><p class="muted">Loading…</p></div>
     <h2>Operations</h2>
     ${ops ? opsTable(ops.operations) : `<div class="banner warn">History unavailable (Argus unreachable).</div>`}`);
+  envAndToken(entry);
 
   view.querySelectorAll('[data-op]').forEach((b) =>
     b.addEventListener('click', async () => {

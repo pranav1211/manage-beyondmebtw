@@ -77,6 +77,9 @@ test('issuing a token writes it into the app env file; only its hash is stored i
   assert.ok(!stored.includes(r.body.token), 'token itself never stored');
   assert.match(stored, /"tokenHash": "[0-9a-f]{64}"/);
   assert.deepEqual(submitted, [['pm2.restart', 'site-app']], 'app restarted to pick up its env');
+  const dead = await admin('POST', '/apps/site-app/token', { scopes: [{ resource: 'key.or.prefix.*', access: ['read', 'write'] }] });
+  assert.equal(dead.status, 400, 'a scope that matches nothing is refused');
+  assert.deepEqual(dead.body.details.resources, ['key.or.prefix.*']);
   const view = await admin('GET', '/apps/site-app/token');
   assert.ok(view.body.client && !JSON.stringify(view.body).includes(r.body.token), 'token never shown again');
 });

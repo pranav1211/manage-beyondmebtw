@@ -363,10 +363,23 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
         collections: all.filter((r) => r.status === 'collection' && grant(`${r.key}.x`)).map((r) => ({ key: `${r.key}.{id}`, access: grant(`${r.key}.x`) }))
       };
     };
+    // Every scope must reach at least one real catalog resource or collection —
+    // a typo or placeholder must never yield a token that silently grants nothing.
+    const assertScopesMatch = (scopes) => {
+      const keys = resources ? resources.catalog.list().map((e) => (e.collection && !e.collectionKey ? `${e.key}.x` : e.key)) : [];
+      const dead = (Array.isArray(scopes) ? scopes : []).filter((s) => s && typeof s.resource === 'string' && !keys.some((k) => scopeAllows([{ resource: s.resource, access: ['read'] }], k, 'read')));
+      if (dead.length) throw new AppError('VALIDATION_FAILED', 'Scope matches no catalog resource or collection', { resources: dead.map((s) => s.resource) });
+    };
+    // Suggested scopes: the catalog entries this application owns.
+    const suggestedScopes = (application) =>
+      (resources ? resources.catalog.list() : [])
+        .filter((e) => e.owner === application && !e.collectionKey)
+        .map((e) => ({ resource: e.collection ? `${e.key}.*` : e.key, access: ['read', 'write'] }));
+
     router.get('/apps/:app/token', (req, res) => {
       const entry = registered(req.params.app);
       const client = apiClients.list().find((c) => c.application === entry.application && !c.revoked) || null;
-      res.json({ client, ...(client ? { endpoints: endpointsFor(client.scopes) } : {}) });
+      res.json({ client, suggestedScopes: suggestedScopes(entry.application), ...(client ? { endpoints: endpointsFor(client.scopes) } : {}) });
     });
     router.post('/apps/:app/token', wrap(async (req, res) => {
       const entry = registered(req.params.app);
@@ -374,6 +387,7 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
       const unknown = Object.keys(body).filter((k) => !['scopes', 'description', 'restart'].includes(k));
       if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
       envStore.list(entry.application); // refuses control-plane apps before anything is issued
+      assertScopesMatch(body.scopes);
       const issued = await apiClients.issueForApp(entry.application, body.scopes, body.description || '');
       const env = envStore.update(
         entry.application,

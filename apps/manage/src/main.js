@@ -210,7 +210,8 @@ async function envAndToken(entry) {
       return;
     }
     const c = t.client;
-    const scopes = c ? c.scopes : [{ resource: 'key.or.prefix.*', access: ['read', 'write'] }];
+    // Current scopes, else the catalog entries this app owns (never a fake placeholder).
+    const scopes = c ? c.scopes : t.suggestedScopes || [];
     tokBox.innerHTML = `${note}
       ${c ? `<dl class="kv"><dt>Client</dt><dd><code>${esc(c.id)}</code> · issued ${time(c.issuedAt)}</dd>
         <dt>Endpoint base</dt><dd><code>${esc(t.endpoints.base)}</code></dd>

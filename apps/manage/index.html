@@ -3,24 +3,23 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
     <title>Manage — Beyond Me</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <main class="shell">
-      <header class="shell__header">
-        <h1>Manage</h1>
-        <p class="shell__sub">Beyond Me control &amp; data plane — Phase 3 skeleton</p>
-      </header>
-      <section class="shell__status" id="status" aria-live="polite">
-        <span class="dot" aria-hidden="true"></span>
-        <span id="status-text">Checking Manage API…</span>
-      </section>
-      <p class="shell__note">
-        Frontend talks only to the Manage API (<code>/api/v1</code>). It never
-        calls Argus and holds no infrastructure credentials.
-      </p>
-    </main>
+    <header class="topbar hidden" id="topbar">
+      <a class="brand" href="#/">Manage</a>
+      <nav class="nav" id="nav">
+        <a href="#/" data-route="overview">Overview</a>
+        <a href="#/apps" data-route="apps">Applications</a>
+        <a href="#/ops" data-route="ops">Operations</a>
+        <a href="#/reconcile" data-route="reconcile">Reconcile</a>
+        <a href="#/registry" data-route="registry">Registry</a>
+      </nav>
+      <button class="btn ghost" id="logout" type="button">Log out</button>
+    </header>
+    <main id="view" class="view" aria-live="polite"></main>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

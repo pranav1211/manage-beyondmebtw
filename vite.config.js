@@ -9,7 +9,7 @@ export default defineConfig({
     // Dev proxy so the frontend talks only to the Manage API (never Argus).
     proxy: {
       '/api': {
-        target: 'http://localhost:7000',
+        target: 'http://127.0.0.1:7100',
         changeOrigin: true
       }
     }

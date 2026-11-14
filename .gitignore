@@ -12,7 +12,8 @@ node_modules/
 
 # ── Build outputs / generated artifacts ──────────────────────────────
 dist/
-apps/manage/dist/
+# apps/manage/dist is a committed release artifact (built locally; shipped by deploys)
+!apps/manage/dist/
 .vite/
 coverage/
 

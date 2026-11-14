@@ -28,6 +28,11 @@ export default [
         fetch: 'readonly',
         structuredClone: 'readonly',
         AbortSignal: 'readonly',
+        URLSearchParams: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        FormData: 'readonly',
+        location: 'readonly',
         // Browser (apps/manage)
         document: 'readonly',
         window: 'readonly'

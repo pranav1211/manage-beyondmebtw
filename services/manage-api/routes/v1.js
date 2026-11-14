@@ -10,6 +10,7 @@ import { validateRegistryEntry } from '../../../shared/schemas/index.js';
 import { verifyPassword, parseCookies, sessionCookie, SESSION_COOKIE } from '../auth.js';
 
 export const GLOBAL_RECONCILE_CONFIRMATION = 'RECONCILE ALL ELIGIBLE APPS';
+export const PUBLIC_ORIGIN_RE = /^https:\/\/([a-z0-9-]+\.)*beyondmebtw\.com$/;
 
 const STATUS_FOR = {
   UNAUTHENTICATED: 401,
@@ -95,6 +96,16 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
   // Catalog-gated: callers name a key, never a path. Private resources are
   // indistinguishable from unknown keys without an admin session.
   if (resources) {
+    // Sites on *.beyondmebtw.com read public resources from the browser.
+    // GET only, never credentialed (private data still needs the same-origin
+    // Manage session, which CORS does not grant).
+    router.use('/data/resources', (req, res, next) => {
+      const origin = req.get('origin');
+      if (req.method === 'GET' && origin && PUBLIC_ORIGIN_RE.test(origin)) {
+        res.set({ 'Access-Control-Allow-Origin': origin, Vary: 'Origin' });
+      }
+      next();
+    });
     router.get('/data/resources', (req, res) => {
       res.json({ resources: resources.list({ admin: Boolean(sessionOf(req)) }) });
     });

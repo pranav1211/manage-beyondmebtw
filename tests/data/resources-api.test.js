@@ -142,6 +142,20 @@ test('reads: missing and malformed canonical files are explicit errors, never em
   assert.equal(missing.body.details.reason, 'missing');
 });
 
+test('CORS: public GETs allow *.beyondmebtw.com origins only, never credentials', async () => {
+  const repo = makeSeededDataRepo();
+  const { s } = await boot(repo);
+  const get = (origin) => fetch(`${s.base}/api/v1/data/resources/notes`, { headers: { origin } });
+  for (const ok of ['https://beyondmebtw.com', 'https://photos.beyondmebtw.com', 'https://f1ta.beyondmebtw.com']) {
+    const r = await get(ok);
+    assert.equal(r.headers.get('access-control-allow-origin'), ok);
+    assert.equal(r.headers.get('access-control-allow-credentials'), null);
+  }
+  for (const bad of ['https://evilbeyondmebtw.com', 'http://beyondmebtw.com', 'https://beyondmebtw.com.evil.io', 'null']) {
+    assert.equal((await get(bad)).headers.get('access-control-allow-origin'), null, bad);
+  }
+});
+
 // ── Writes ─────────────────────────────────────────────────────────────────
 test('writes: unauthenticated 401, missing CSRF 403, invalid payload leaves the file byte-identical', async () => {
   const repo = makeSeededDataRepo();

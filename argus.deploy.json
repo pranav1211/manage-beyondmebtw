@@ -3,9 +3,15 @@
   "repository": "git@github.com:pranav1211/manage-beyondmebtw.git",
   "branch": "main",
   "type": "node",
-  "deploymentPath": "/projects/manage",
+  "deploymentPath": "/projects/manage-beyondmebtw",
   "domain": "manage.beyondmebtw.com",
-  "isPrimaryDomain": true,
-  "pm2Config": "manage.config.js",
-  "nginxConfig": "manage.conf"
+  "isPrimaryDomain": false,
+  "pm2Config": "manage-beyondmebtw.config.js",
+  "nginxConfig": "manage.conf",
+  "runtime": {
+    "script": "services/manage-api/index.js",
+    "port": 7100,
+    "healthPath": "/health",
+    "envFile": true
+  }
 }

@@ -33,6 +33,24 @@ export const RESERVED_PORTS = Object.freeze([6009, 6011, 6021, 6030, 6040, 7000,
 
 const PROJECTS_PREFIX = '/projects/';
 
+/**
+ * Can Argus execute against this registry entry in the current mode?
+ * production: developer-declared allowlist only, never test entries, enabled only.
+ * isolated-test: enabled entries (isolated roots are enforced by config).
+ * @returns {{ok:boolean, code?:string, reason?:string}}
+ */
+export function executability(entry, { mode, allowlist = [] }) {
+  if (!entry) return { ok: false, code: 'UNKNOWN_TARGET', reason: 'Application is not registered' };
+  if (entry.enabled !== true) return { ok: false, code: 'TARGET_DISABLED', reason: 'Target is disabled' };
+  if (mode === 'production') {
+    if (entry.environment === 'test') return { ok: false, code: 'TARGET_NOT_ALLOWED', reason: 'Test entries are never executed in production mode' };
+    if (!allowlist.includes(entry.application)) {
+      return { ok: false, code: 'TARGET_NOT_ALLOWED', reason: 'Application is not on the production execution allowlist' };
+    }
+  }
+  return { ok: true };
+}
+
 export function createLifecycle(ctx) {
   const { store } = ctx;
   // Argus owns its (isolated) projects root; establish it on first use so a
@@ -55,6 +73,16 @@ export function createLifecycle(ctx) {
     }
     return translateCwd(entry.deploymentPath);
   }
+
+  function assertExecutable(entry) {
+    const r = executability(entry, { mode: ctx.mode, allowlist: ctx.allowlist });
+    if (!r.ok) throw new AppError(r.code, r.reason);
+    return entry;
+  }
+
+  const bootstrapNames = ctx.bootstrapNames || new Set(['argus']);
+  // Secrets: apps with an env file load their own; only isolated tests inject.
+  const secretEnvFor = (proc) => (proc.envFile ? {} : ctx.secretEnv(proc.envRefs || []));
 
   function managedNames(registry) {
     return new Set(registry.nodeApplications().map((e) => e.application));
@@ -99,8 +127,7 @@ export function createLifecycle(ctx) {
       store.stage(id, stage);
       const registry = ctx.loadRegistry();
       const entry = registry.get(job.application);
-      if (!entry) throw new AppError('UNKNOWN_TARGET', 'Application is not registered');
-      if (entry.enabled !== true) throw new AppError('TARGET_DISABLED', 'Target is disabled');
+      assertExecutable(entry);
 
       stage = 'load-config';
       store.stage(id, stage);
@@ -174,9 +201,10 @@ export function createLifecycle(ctx) {
           application: entry.application,
           ecosystem: parsed.ecosystem,
           translateCwd,
-          secretEnv: ctx.secretEnv(proc.envRefs || []),
+          secretEnv: secretEnvFor(proc),
           revision,
           managedNames: managedNames(registry),
+          bootstrapNames,
           settleMs: ctx.pm2SettleMs
         });
         healthUrl = nodeHealthUrl(proc.port, decl.runtime.healthPath);
@@ -208,9 +236,7 @@ export function createLifecycle(ctx) {
   }
 
   function requireEntry(application) {
-    const entry = ctx.loadRegistry().get(application);
-    if (!entry) throw new AppError('UNKNOWN_TARGET', 'Application is not registered');
-    return entry;
+    return assertExecutable(ctx.loadRegistry().get(application));
   }
 
   async function runOperation(job) {
@@ -234,9 +260,10 @@ export function createLifecycle(ctx) {
             application: entry.application,
             ecosystem: parsed.ecosystem,
             translateCwd,
-            secretEnv: ctx.secretEnv(parsed.meta.processes[0].envRefs || []),
+            secretEnv: secretEnvFor(parsed.meta.processes[0]),
             revision: deployed.commit || 'unknown',
             managedNames: managedNames(registry),
+            bootstrapNames,
             settleMs: ctx.pm2SettleMs
           });
         });
@@ -251,6 +278,9 @@ export function createLifecycle(ctx) {
       case 'nginx.validate':
       case 'nginx.apply':
         return simple(job, 'deploy', async () => {
+          if (ctx.mode === 'production') {
+            throw new AppError('TARGET_NOT_ALLOWED', 'Nginx operations are not enabled in production mode yet (ingress cutover stage)');
+          }
           if (!ctx.nginxRunner) throw new AppError('CONFIG_MISSING', 'No isolated Nginx environment configured');
           const file = job.params && job.params.file;
           const { manifest } = loadManifest(ctx.configRepo.root);
@@ -273,5 +303,34 @@ export function createLifecycle(ctx) {
     }
   }
 
-  return { runOperation, deploy, translateCwd };
+  /** Read-only application status for Manage (no side effects). */
+  async function appStatus(application) {
+    const entry = ctx.loadRegistry().get(application);
+    if (!entry) throw new AppError('UNKNOWN_TARGET', 'Application is not registered');
+    const exec = executability(entry, { mode: ctx.mode, allowlist: ctx.allowlist });
+    let declaration = null;
+    try {
+      const dir = deploymentDir(entry);
+      if (existsSync(join(dir, 'argus.deploy.json'))) declaration = compareDeclaration(entry, readDeclaration(dir));
+    } catch (err) {
+      declaration = { error: err.code || 'INTERNAL' };
+    }
+    let processes = null;
+    if (entry.type === 'node') {
+      try {
+        processes = await describe([entry.application]);
+      } catch {
+        processes = null; // unknown — never guessed
+      }
+    }
+    return {
+      application,
+      executable: exec,
+      declaration, // null = not deployed / not checked
+      processes, // null = unknown
+      deployed: store.getDeployed(application)
+    };
+  }
+
+  return { runOperation, deploy, translateCwd, appStatus };
 }

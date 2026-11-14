@@ -14,6 +14,8 @@ import { AppError } from '../../shared/errors.js';
 import { validatePm2AppConfig } from '../../shared/schemas/index.js';
 
 const META_PREFIX = '// argus-meta: ';
+// Server-side secrets location (Architecture: /infrastructure/env/<app>.env).
+export const ENV_ROOT = '/infrastructure/env';
 const EXPORT_PREFIX = 'module.exports = ';
 
 export function pm2FileName(application) {
@@ -37,7 +39,9 @@ export function buildPm2Metadata(entry, declaration) {
         execMode: 'fork',
         instances: runtime.instances || 1,
         port: runtime.port,
-        envRefs: [...(runtime.envRefs || [])].sort()
+        envRefs: [...(runtime.envRefs || [])].sort(),
+        // Path only — the app loads its own secrets; values never reach Argus/PM2.
+        envFile: runtime.envFile ? `${ENV_ROOT}/${entry.application}.env` : null
       }
     ]
   };
@@ -57,7 +61,9 @@ function toEcosystem(meta) {
       instances: p.instances,
       autorestart: true,
       max_restarts: 5,
-      // Non-secret runtime env only. Secrets: see argus-meta envRefs.
+      ...(p.envFile ? { node_args: [`--env-file=${p.envFile}`] } : {}),
+      // Non-secret runtime env only. Secrets: the env file (path above) or
+      // argus-meta envRefs — never values here.
       env: { NODE_ENV: 'production', PORT: String(p.port) }
     }))
   };

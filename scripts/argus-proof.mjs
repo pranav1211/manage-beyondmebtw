@@ -8,6 +8,7 @@
 // Required env:
 //   ARGUS_PROOF_ROOT   scratch dir for projects/state/PM2 home/evidence
 //   CONFIG_REPO_ROOT   disposable bmb-infrastructure checkout
+//   REGISTRY_PATH      registry file (bmb-data/registry/applications.json)
 // Optional env:
 //   CONFIG_REPO_BRANCH disposable branch (default argus-proof/f1-titles-data)
 //   F1_DEV_CHECKOUT    developer checkout, hashed before/after to prove its data is untouched
@@ -61,7 +62,7 @@ const config = loadConfig({
     ARGUS_MODE: 'isolated-test',
     PROJECTS_ROOT: join(ROOT, 'projects'),
     ARGUS_STATE_ROOT: join(ROOT, 'state-proof'),
-    REGISTRY_PATH: join(REPO, 'data', 'registry', 'applications.json'),
+    REGISTRY_PATH: must('REGISTRY_PATH'),
     CONFIG_REPO_ROOT: CFG,
     CONFIG_REPO_BRANCH: BRANCH
   }

@@ -29,7 +29,7 @@ import { loadRegistry } from './registry.js';
 import { parseWebhook } from './webhook.js';
 import { OperationStore } from './operations.js';
 import { Mutex, AppScheduler } from './locks.js';
-import { createLifecycle } from './lifecycle.js';
+import { createLifecycle, executability } from './lifecycle.js';
 import { createNginxRunner } from './nginx.js';
 
 const PARAM_KEYS = Object.freeze({
@@ -46,6 +46,7 @@ const STATUS_FOR = {
   UNKNOWN_TARGET: 404,
   RESOURCE_NOT_FOUND: 404,
   TARGET_DISABLED: 409,
+  TARGET_NOT_ALLOWED: 403,
   EXECUTION_DISABLED: 503,
   NOT_IMPLEMENTED: 501
 };
@@ -60,6 +61,9 @@ export function buildContext(config, overrides = {}) {
   return {
     config,
     env,
+    mode: s.mode,
+    allowlist: s.executionAllowlist,
+    bootstrapNames: new Set(['argus']),
     store: new OperationStore(s.stateRoot),
     infraLock: new Mutex(),
     loadRegistry: () => loadRegistry(resolve(s.registryPath)),
@@ -135,6 +139,12 @@ export function createApp(config = loadConfig(), overrides = {}) {
 
     if (parsed.kind === 'ping') return res.status(200).json({ message: 'pong', application: parsed.application });
 
+    const gate = executability(ctx.loadRegistry().get(parsed.application), { mode: ctx.mode, allowlist: ctx.allowlist });
+    if (!gate.ok && parsed.kind === 'deploy') {
+      ctx.store.audit({ kind: 'webhook-refused', code: gate.code, application: parsed.application, delivery: headers['x-github-delivery'] || null });
+      return res.status(statusFor({ code: gate.code })).json({ code: gate.code, message: gate.reason });
+    }
+
     const record = ctx.store.create({
       operation: 'deploy',
       application: parsed.application,
@@ -183,6 +193,14 @@ export function createApp(config = loadConfig(), overrides = {}) {
       return res.status(501).json({ code: ERROR_CODES.NOT_IMPLEMENTED, message: 'Argus execution is disabled in this configuration' });
     }
 
+    let gate;
+    try {
+      gate = executability(ctx.loadRegistry().get(body.application), { mode: ctx.mode, allowlist: ctx.allowlist });
+    } catch (err) {
+      return res.status(statusFor(err)).json(sanitizeError(err));
+    }
+    if (!gate.ok) return res.status(statusFor({ code: gate.code })).json({ code: gate.code, message: gate.reason });
+
     const record = ctx.store.create({ operation: body.operation, application: body.application, params: body.params });
     const job = { operationId: record.operationId, operation: body.operation, application: body.application, params: body.params || {} };
 
@@ -196,6 +214,28 @@ export function createApp(config = loadConfig(), overrides = {}) {
       .withLock(() => lifecycle.runOperation(job), 30 * 60_000)
       .catch((err) => ctx.store.fail(record.operationId, null, err));
     return res.status(202).json({ operationId: record.operationId, started: true });
+  });
+
+  // Recent operation history (newest first), optional application filter.
+  app.get('/operations', requireToken, (req, res) => {
+    if (!ctx) return res.status(501).json({ code: ERROR_CODES.NOT_IMPLEMENTED, message: 'Argus execution is disabled' });
+    const application = req.query.application ? String(req.query.application) : null;
+    if (application && !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(application)) {
+      return res.status(400).json({ code: ERROR_CODES.INVALID_IDENTIFIER, message: 'Invalid application' });
+    }
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 25, 1), 100);
+    const all = ctx.store.list().filter((r) => !application || r.application === application).reverse();
+    return res.json({ operations: all.slice(0, limit), total: all.length });
+  });
+
+  // Read-only application status: declaration compare, own PM2 processes, last deploy.
+  app.get('/apps/:application/status', requireToken, async (req, res) => {
+    if (!ctx) return res.status(501).json({ code: ERROR_CODES.NOT_IMPLEMENTED, message: 'Argus execution is disabled' });
+    try {
+      return res.json(await lifecycle.appStatus(String(req.params.application)));
+    } catch (err) {
+      return res.status(statusFor(err)).json(sanitizeError(err));
+    }
   });
 
   app.get('/operations/:id', requireToken, (req, res) => {
@@ -221,7 +261,7 @@ export function createApp(config = loadConfig(), overrides = {}) {
   return app;
 }
 
-export function start(config = loadConfig()) {
+export function start(config = loadConfig({ service: 'argus' })) {
   const app = createApp(config);
   // Bind to localhost ONLY — enforced here and validated in loadConfig.
   return app.listen(config.argusPort, config.argusBind, () => {

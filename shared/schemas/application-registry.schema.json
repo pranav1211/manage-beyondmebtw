@@ -34,7 +34,10 @@
     },
     "type": {
       "type": "string",
-      "enum": ["static", "node"]
+      "enum": [
+        "static",
+        "node"
+      ]
     },
     "deploymentPath": {
       "type": "string",
@@ -49,11 +52,17 @@
       "type": "boolean"
     },
     "pm2Config": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Infrastructure PM2 config filename, or null for static apps."
     },
     "nginxConfig": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Infrastructure Nginx config filename, or null for wildcard default."
     },
     "enabled": {
@@ -63,12 +72,32 @@
       "type": "string",
       "description": "Name of the env var holding this target's webhook secret (custom secret). Omitted = default secret policy. Never the secret value.",
       "pattern": "^[A-Z][A-Z0-9_]*$"
+    },
+    "environment": {
+      "type": "string",
+      "enum": [
+        "production",
+        "test"
+      ],
+      "description": "test = non-production target; production-mode Argus refuses test entries. Omitted = production."
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "type": { "const": "static" } } },
-      "then": { "properties": { "pm2Config": { "type": "null" } } }
+      "if": {
+        "properties": {
+          "type": {
+            "const": "static"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "pm2Config": {
+            "type": "null"
+          }
+        }
+      }
     }
   ]
 }

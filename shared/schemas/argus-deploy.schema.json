@@ -31,7 +31,10 @@
     },
     "type": {
       "type": "string",
-      "enum": ["static", "node"]
+      "enum": [
+        "static",
+        "node"
+      ]
     },
     "deploymentPath": {
       "type": "string",
@@ -45,25 +48,56 @@
       "type": "boolean"
     },
     "pm2Config": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "nginxConfig": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "runtime": {
       "type": "object",
       "description": "How the app runs (Node apps). Ports live here and flow into the Argus-generated PM2 config — never into the Manage registry.",
       "additionalProperties": false,
-      "required": ["script", "port", "healthPath"],
+      "required": [
+        "script",
+        "port",
+        "healthPath"
+      ],
       "properties": {
-        "script": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.(c|m)?js$" },
-        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
-        "healthPath": { "type": "string", "pattern": "^/[A-Za-z0-9._/?=&-]*$" },
-        "instances": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "script": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*\\.(c|m)?js$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "healthPath": {
+          "type": "string",
+          "pattern": "^/[A-Za-z0-9._/?=&-]*$"
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4
+        },
         "envRefs": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
           "uniqueItems": true
+        },
+        "envFile": {
+          "type": "boolean",
+          "description": "App loads /infrastructure/env/<application>.env via node --env-file (values never pass through Argus/PM2)."
         }
       }
     }

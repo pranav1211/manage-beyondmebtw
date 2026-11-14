@@ -139,9 +139,10 @@ function hashApp(app) {
  * @param {Record<string,string>} [p.secretEnv] resolved secret env (never persisted)
  * @param {string} p.revision deployed revision
  * @param {Set<string>} p.managedNames all Argus-managed process names
+ * @param {Set<string>} [p.bootstrapNames] documented bootstrap processes (Argus itself)
  * @param {number} [p.settleMs] wait before verifying the process stayed up
  */
-export async function reconcileApp({ application, ecosystem, translateCwd, secretEnv = {}, revision, managedNames, settleMs = 2500 }) {
+export async function reconcileApp({ application, ecosystem, translateCwd, secretEnv = {}, revision, managedNames, bootstrapNames = new Set(), settleMs = 2500 }) {
   for (const a of ecosystem.apps) {
     if (a.name !== application && !a.name.startsWith(`${application}-`)) {
       throw new AppError('FORBIDDEN', 'Ecosystem defines a process this application does not own', { name: a.name });
@@ -168,6 +169,8 @@ export async function reconcileApp({ application, ecosystem, translateCwd, secre
         // Never let Argus's own credentials leak into a managed app's env
         // (PM2 otherwise inherits the caller's environment).
         filter_env: FILTERED_ENV_PREFIXES,
+        // e.g. --env-file=/infrastructure/env/<app>.env (path only).
+        ...(app.node_args ? { node_args: app.node_args } : {}),
         env: { ...app.env, ...secretEnv, ARGUS_CONFIG_HASH: configHash, ARGUS_REVISION: revision }
       };
       const current = before.find((p) => p.name === app.name);
@@ -223,7 +226,10 @@ export async function reconcileApp({ application, ecosystem, translateCwd, secre
       actions,
       actual,
       otherManaged: others.filter((p) => managedNames.has(p.name)).map((p) => p.name),
-      unmanaged: others.filter((p) => !managedNames.has(p.name)).map((p) => ({ name: p.name, status: p.status }))
+      bootstrap: others.filter((p) => bootstrapNames.has(p.name)).map((p) => ({ name: p.name, status: p.status })),
+      unmanaged: others
+        .filter((p) => !managedNames.has(p.name) && !bootstrapNames.has(p.name))
+        .map((p) => ({ name: p.name, status: p.status }))
     };
   });
 }

@@ -5,7 +5,13 @@
   "description": "Maps a stable logical key to a relative path under a canonical root, its format, API exposure and access policy. Clients address resources by key, never by filesystem path.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["key", "root", "path", "format", "access"],
+  "required": [
+    "key",
+    "root",
+    "path",
+    "format",
+    "access"
+  ],
   "properties": {
     "key": {
       "type": "string",
@@ -14,29 +20,127 @@
     },
     "root": {
       "type": "string",
-      "enum": ["data", "content"]
+      "enum": [
+        "data",
+        "content"
+      ]
     },
     "path": {
       "type": "string",
       "description": "Relative path under the root. No absolute paths, no traversal.",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
-      "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+      "not": {
+        "pattern": "(^|/)\\.\\.(/|$)"
+      }
     },
     "format": {
       "type": "string",
-      "enum": ["json", "markdown"]
+      "enum": [
+        "json",
+        "markdown"
+      ]
     },
     "access": {
       "type": "string",
-      "enum": ["public", "private"]
+      "enum": [
+        "public",
+        "private"
+      ]
     },
     "writable": {
       "type": "boolean",
       "default": true
     },
     "schemaRef": {
-      "type": ["string", "null"],
-      "description": "Optional id of a per-dataset validation schema."
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional id of a per-dataset validation schema.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "owner": {
+      "type": "string",
+      "description": "Owning domain/application.",
+      "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "imported",
+        "mapped",
+        "deferred"
+      ],
+      "default": "mapped",
+      "description": "imported = canonical copy lives here; mapped = destination defined, not migrated; deferred = known, not mapped yet."
+    },
+    "operations": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "enum": [
+          "read",
+          "replace",
+          "create-item",
+          "update-item",
+          "delete-item"
+        ]
+      }
+    },
+    "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pointer",
+        "idField"
+      ],
+      "description": "Item-level access: the array at `pointer` (\"\" = document root) keyed by `idField`.",
+      "properties": {
+        "pointer": {
+          "type": "string",
+          "pattern": "^(/[A-Za-z0-9_]+)?$"
+        },
+        "idField": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_]+$"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "path"
+      ],
+      "description": "Where the dataset currently lives (comparison mode / migration evidence).",
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+        }
+      }
+    },
+    "consumers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 1000
     }
   }
 }

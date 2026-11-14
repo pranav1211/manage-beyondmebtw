@@ -14,6 +14,9 @@ import { createV1Router, statusFor } from './routes/v1.js';
 import { SessionStore, LoginLimiter } from './auth.js';
 import { createArgusClient } from './argus-client.js';
 import { createRegistryStore } from './registry-store.js';
+import { createResourceStore } from './resource-store.js';
+import { createDataWebhookHandler, fullNameOf } from './data-webhook.js';
+import { createDataRepo } from '../../shared/data/data-repo.js';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST = join(REPO_ROOT, 'apps', 'manage', 'dist');
@@ -46,13 +49,31 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
   // simply don't survive restarts). Production requires it via loadConfig.
   const sessions = deps.sessions || new SessionStore({ secret: env.MANAGE_SESSION_SECRET || randomBytes(32).toString('hex') });
   const argus = deps.argus || createArgusClient({ baseUrl: config.manage.argusUrl, token: env.ARGUS_INTERNAL_TOKEN });
-  const registry =
-    deps.registry ||
-    createRegistryStore({
+  // One coordinated writer for the bmb-data checkout: registry + canonical
+  // data + webhook syncs share its Git lock, journal and history.
+  const dataRepo =
+    deps.dataRepo ||
+    createDataRepo({
       root: resolve(config.manage.dataRepoRoot),
       branch: config.manage.dataRepoBranch,
-      expectedRemote: config.manage.dataRepoRemote
+      expectedRemote: config.manage.dataRepoRemote,
+      stateRoot: resolve(config.manage.stateRoot)
     });
+  const registry = deps.registry || createRegistryStore({ dataRepo, expectedRemote: config.manage.dataRepoRemote });
+  const resources = deps.resources || createResourceStore({ dataRepo, sourceRoots: config.manage.sourceRoots });
+  app.locals.dataRepo = dataRepo;
+
+  // bmb-data webhook: raw body (exact signed bytes), before any JSON parser/session gate.
+  app.post(
+    '/api/v1/webhooks/bmb-data',
+    express.raw({ type: () => true, limit: '1mb' }),
+    createDataWebhookHandler({
+      dataRepo,
+      expectedFullName: deps.dataRepoFullName || fullNameOf(config.manage.dataRepoRemote),
+      branch: config.manage.dataRepoBranch,
+      env
+    })
+  );
 
   app.use(
     '/api/v1',
@@ -62,6 +83,8 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       passwordHash: env.MANAGE_ADMIN_PASSWORD_HASH || null,
       argus,
       registry,
+      resources,
+      dataRepo,
       secureCookies: config.manage.secureCookies,
       env: config.nodeEnv
     })
@@ -85,8 +108,16 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
   return app;
 }
 
-export function start(config = loadConfig({ service: 'manage' })) {
+export async function start(config = loadConfig({ service: 'manage' })) {
   const app = createApp(config);
+  // Finish or discard interrupted data operations BEFORE serving requests.
+  try {
+    const outcomes = await app.locals.dataRepo.recover();
+    if (outcomes.length) console.log(`[manage-api] data recovery: ${JSON.stringify(outcomes)}`);
+  } catch (err) {
+    // Visible in /api/v1/data/status; Manage still serves reads.
+    console.error(`[manage-api] data recovery failed: ${err.code || 'INTERNAL'} ${err.message}`);
+  }
   // Loopback only: nginx is the sole public entry point.
   return app.listen(config.manageApiPort, '127.0.0.1', () => {
     console.log(`[manage-api] listening on 127.0.0.1:${config.manageApiPort} (${config.nodeEnv})`);

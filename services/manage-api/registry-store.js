@@ -1,20 +1,40 @@
 // Manage-owned application registry, stored in the private bmb-data repo at
-// registry/applications.json. Manage is the ONLY writer. Every change is a
-// scoped commit + push through the shared workflow (atomic write, no
-// `git add .`, no force-push, remote read-back). A failed push leaves the
+// registry/applications.json. Manage is the ONLY writer. Writes go through the
+// shared DataRepo (same Git lock, journal, exact-path commit, push, read-back
+// as canonical data), serialized on the "registry" resource lock, so registry
+// and data writes can never race on the checkout. A failed push leaves the
 // change committed locally and reported as pending/retryable — never as saved.
+//
+// The registry is a separately protected operational resource: it is not in
+// the catalog and is never exposed through the generic resource API.
 
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { AppError } from '../../shared/errors.js';
 import { validateRegistryEntry } from '../../shared/schemas/index.js';
-import { persistScopedFiles } from '../../shared/git-persistence.js';
-import { Mutex } from '../argus/locks.js';
+import { createDataRepo } from '../../shared/data/data-repo.js';
+import { readTextOrNull } from '../../shared/data/durable.js';
 
 export const REGISTRY_REL = 'registry/applications.json';
+const LOCK_KEY = '@registry';
 
-export function createRegistryStore({ root, branch, expectedRemote, lock = new Mutex() }) {
-  const path = join(root, REGISTRY_REL);
+/**
+ * @param {object} p
+ * @param {object} [p.dataRepo] shared DataRepo (production wiring)
+ * @param {string} [p.root] bmb-data checkout (when no dataRepo is given)
+ * @param {string} [p.branch]
+ * @param {string} [p.expectedRemote]
+ * @param {string} [p.stateRoot] runtime state dir (default: sibling of the checkout)
+ */
+export function createRegistryStore({ dataRepo, root, branch = 'main', expectedRemote, stateRoot } = {}) {
+  const repo =
+    dataRepo ||
+    createDataRepo({
+      root,
+      branch,
+      expectedRemote,
+      stateRoot: stateRoot || `${resolve(root)}.manage-state`
+    });
+  const path = join(repo.root, REGISTRY_REL);
 
   function validateAll(applications) {
     const seen = new Set();
@@ -27,10 +47,11 @@ export function createRegistryStore({ root, branch, expectedRemote, lock = new M
   }
 
   function read() {
-    if (!existsSync(path)) return [];
+    const text = readTextOrNull(path);
+    if (text === null) return [];
     let doc;
     try {
-      doc = JSON.parse(readFileSync(path, 'utf8'));
+      doc = JSON.parse(text);
     } catch {
       throw new AppError('REGISTRY_INVALID', 'Registry file is not valid JSON');
     }
@@ -39,68 +60,86 @@ export function createRegistryStore({ root, branch, expectedRemote, lock = new M
     return doc.applications;
   }
 
+  // Stage 5 response shape, preserved: { committed, pushed, commit, pending } (+ operationId/status).
+  function shape(op) {
+    if (op.status === 'blocked' || op.status === 'failed') {
+      throw new AppError(op.lastError && op.lastError.code ? op.lastError.code : 'OPERATION_FAILED', op.lastError ? op.lastError.message : 'Registry write failed', {
+        operationId: op.operationId,
+        status: op.status
+      });
+    }
+    return {
+      operationId: op.operationId,
+      status: op.status,
+      committed: op.status !== 'noop' && Boolean(op.commit),
+      pushed: op.status === 'succeeded',
+      commit: op.commit || null,
+      pending: op.status === 'pending-push',
+      ...(op.status === 'pending-push' && op.lastError ? { error: { code: op.lastError.code, message: op.lastError.message } } : {})
+    };
+  }
+
   async function write(applications, message) {
     validateAll(applications);
     const content = JSON.stringify({ applications }, null, 2) + '\n';
-    try {
-      const r = await persistScopedFiles({
-        root,
-        branch,
-        expectedRemote,
-        allowedPaths: ['registry/'],
-        files: [{ relPath: REGISTRY_REL, content }],
-        message,
-        lock,
-        codePrefix: 'DATA_REPO',
-        author: { name: 'manage', email: 'manage@localhost' }
-      });
-      return { committed: r.changed, pushed: r.pushed, commit: r.commit, pending: false };
-    } catch (err) {
-      if (err.code === 'GIT_FAILED' && err.details && err.details.retryable) {
-        // Saved + committed locally; not yet on GitHub. Visible, retryable.
-        return { committed: true, pushed: false, pending: true, commit: err.details.localCommit, error: { code: err.code, message: err.message } };
+    const op = await repo.mutate({
+      action: 'registry.update',
+      keys: ['registry'],
+      changes: [{ relPath: REGISTRY_REL, content }],
+      message,
+      validate: (_rel, text) => {
+        const doc = JSON.parse(text);
+        if (!doc || !Array.isArray(doc.applications)) throw new AppError('VALIDATION_FAILED', 'Registry must contain an "applications" array');
+        validateAll(doc.applications);
       }
-      throw err;
-    }
+    });
+    return shape(op);
   }
 
+  const locked = (fn) => repo.resourceLocks.withLocks([LOCK_KEY], fn);
+
   return Object.freeze({
-    source: { repository: expectedRemote, path: REGISTRY_REL, branch },
+    source: { repository: expectedRemote || null, path: REGISTRY_REL, branch: repo.branch },
     read,
     get: (application) => read().find((e) => e.application === application) || null,
 
-    async create(entry) {
-      const apps = read();
-      if (apps.some((e) => e.application === entry.application)) {
-        throw new AppError('CONFLICT', 'An application with this identity already exists', { application: entry.application });
-      }
-      const next = [...apps, entry];
-      return { entry, persistence: await write(next, `manage: register ${entry.application}`) };
-    },
+    create: (entry) =>
+      locked(async () => {
+        const apps = read();
+        if (apps.some((e) => e.application === entry.application)) {
+          throw new AppError('CONFLICT', 'An application with this identity already exists', { application: entry.application });
+        }
+        return { entry, persistence: await write([...apps, entry], `manage: register ${entry.application}`) };
+      }),
 
-    async replace(application, entry) {
-      if (entry.application !== application) throw new AppError('VALIDATION_FAILED', 'Application identity cannot be changed');
-      const apps = read();
-      const i = apps.findIndex((e) => e.application === application);
-      if (i === -1) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
-      const next = [...apps];
-      next[i] = entry;
-      return { entry, persistence: await write(next, `manage: update ${application}`) };
-    },
+    replace: (application, entry) =>
+      locked(async () => {
+        if (entry.application !== application) throw new AppError('VALIDATION_FAILED', 'Application identity cannot be changed');
+        const apps = read();
+        const i = apps.findIndex((e) => e.application === application);
+        if (i === -1) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
+        const next = [...apps];
+        next[i] = entry;
+        return { entry, persistence: await write(next, `manage: update ${application}`) };
+      }),
 
-    async setEnabled(application, enabled) {
-      if (typeof enabled !== 'boolean') throw new AppError('VALIDATION_FAILED', '"enabled" must be a boolean');
-      const apps = read();
-      const i = apps.findIndex((e) => e.application === application);
-      if (i === -1) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
-      const next = [...apps];
-      next[i] = { ...apps[i], enabled };
-      return { entry: next[i], persistence: await write(next, `manage: ${enabled ? 'enable' : 'disable'} ${application}`) };
-    },
+    setEnabled: (application, enabled) =>
+      locked(async () => {
+        if (typeof enabled !== 'boolean') throw new AppError('VALIDATION_FAILED', '"enabled" must be a boolean');
+        const apps = read();
+        const i = apps.findIndex((e) => e.application === application);
+        if (i === -1) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
+        const next = [...apps];
+        next[i] = { ...apps[i], enabled };
+        return { entry: next[i], persistence: await write(next, `manage: ${enabled ? 'enable' : 'disable'} ${application}`) };
+      }),
 
-    /** Re-run persistence with the current content (pushes any pending commit). */
+    /** Push any pending registry/data commits (Stage 5 compatible). */
     async retryPush() {
-      return { persistence: await write(read(), 'manage: registry retry') };
+      const results = await repo.retryPending();
+      const last = results[results.length - 1];
+      if (!last) return { persistence: { committed: false, pushed: false, commit: null, pending: false, status: 'noop' } };
+      return { persistence: shape(last), retried: results.map((r) => ({ operationId: r.operationId, status: r.status })) };
     }
   });
 }

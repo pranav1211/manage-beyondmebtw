@@ -75,6 +75,20 @@ function parseAllowlist(raw) {
     .filter(Boolean);
 }
 
+function parseSourceRoots(raw) {
+  const out = {};
+  for (const part of String(raw || '').split(';').map((s) => s.trim()).filter(Boolean)) {
+    const i = part.indexOf('=');
+    const repo = part.slice(0, i).trim();
+    const dir = part.slice(i + 1).trim();
+    if (i < 1 || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) || !isAbsolute(dir)) {
+      throw new AppError('CONFIG_INVALID', 'DATA_SOURCE_ROOTS entries must be owner/repo=/absolute/path', { name: 'DATA_SOURCE_ROOTS' });
+    }
+    out[repo] = dir;
+  }
+  return Object.freeze(out);
+}
+
 // Argus execution settings. Fails closed.
 function loadArgusSettings(get, env, isProd, dataRepoRoot) {
   const executionEnabled = get('ARGUS_EXECUTION_ENABLED') === 'true';
@@ -170,6 +184,10 @@ export function loadConfig({ env = process.env, requireSecrets, service } = {}) 
       dataRepoBranch: get('DATA_REPO_BRANCH'),
       dataRepoRemote: get('DATA_REPO_REMOTE'),
       registryPath: argus.registryPath,
+      // Data-operation journal + history + Git lock. Runtime only, never in Git.
+      stateRoot: env.MANAGE_STATE_ROOT || join(pathRoots.logs, 'manage'),
+      // Read-only source checkouts for comparison mode: "owner/repo=/abs/path;..."
+      sourceRoots: parseSourceRoots(env.DATA_SOURCE_ROOTS),
       secureCookies: isProd
     }),
     nodeEnv,

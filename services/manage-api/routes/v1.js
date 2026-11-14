@@ -22,6 +22,11 @@ const STATUS_FOR = {
   DATA_REPO_DIRTY: 409,
   DATA_REPO_DIVERGED: 409,
   DATA_REPO_UNAVAILABLE: 503,
+  DATA_INTEGRITY: 500,
+  CATALOG_INVALID: 500,
+  OPERATION_NOT_ALLOWED: 405,
+  LOCK_TIMEOUT: 503,
+  INVALID_IDENTIFIER: 400,
   RATE_LIMITED: 429,
   NOT_IMPLEMENTED: 501,
   CONFIG_MISSING: 503,
@@ -47,12 +52,17 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * @param {string|null} deps.passwordHash scrypt hash (env), null if unset
  * @param {object} deps.argus argus-client instance
  * @param {object} deps.registry registry-store instance
+ * @param {object} [deps.resources] resource-store instance (canonical data)
+ * @param {object} [deps.dataRepo] shared bmb-data DataRepo
  * @param {boolean} deps.secureCookies
  * @param {string} deps.env node env label
  */
-export function createV1Router({ sessions, limiter, passwordHash, argus, registry, secureCookies, env }) {
+export function createV1Router({ sessions, limiter, passwordHash, argus, registry, resources, dataRepo, secureCookies, env }) {
   const router = express.Router();
+  // Canonical documents can be larger than control-plane requests.
+  router.use('/data', express.json({ limit: '2mb', strict: true }));
   router.use(express.json({ limit: '64kb', strict: true }));
+  const sessionOf = (req) => sessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
 
   // ── Auth ────────────────────────────────────────────────────────────────
   router.post('/auth/login', wrap(async (req, res) => {
@@ -80,6 +90,21 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     const s = sessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
     res.json(s ? { authenticated: true, csrfToken: s.csrf } : { authenticated: false });
   });
+
+  // ── Canonical data: public reads (private resources need a session) ─────
+  // Catalog-gated: callers name a key, never a path. Private resources are
+  // indistinguishable from unknown keys without an admin session.
+  if (resources) {
+    router.get('/data/resources', (req, res) => {
+      res.json({ resources: resources.list({ admin: Boolean(sessionOf(req)) }) });
+    });
+    router.get('/data/resources/:key', (req, res) => {
+      res.json(resources.read(req.params.key, { admin: Boolean(sessionOf(req)) }));
+    });
+    router.get('/data/resources/:key/items/:id', (req, res) => {
+      res.json(resources.readItem(req.params.key, req.params.id, { admin: Boolean(sessionOf(req)) }));
+    });
+  }
 
   // Everything below: admin session required (+ CSRF on mutations).
   router.use((req, res, next) => {
@@ -211,7 +236,74 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     res.status(202).json({ results, skipped });
   }));
 
-  // ── Content domains: Stage 6/8 (legacy Manage keeps these meanwhile) ────
+  // ── Canonical data: admin writes, comparison, operations ───────────────
+  if (resources && dataRepo) {
+    const opts = (req) => ({
+      ifRevision: req.body && req.body.ifRevision !== undefined ? req.body.ifRevision : undefined,
+      idempotencyKey: req.get('idempotency-key') ? String(req.get('idempotency-key')).slice(0, 128) : undefined
+    });
+    // 200 = saved (on GitHub, read back); 202 = committed locally, push pending.
+    const send = (res, out) => res.status(out.persistence.status === 'pending-push' ? 202 : 200).json(out);
+    const opError = (out) => {
+      if (out.persistence.status === 'blocked' || out.persistence.status === 'failed') {
+        const e = out.persistence.error || {};
+        throw new AppError(e.code || 'OPERATION_FAILED', e.message || 'Data operation did not complete', { operationId: out.persistence.operationId, status: out.persistence.status });
+      }
+      return out;
+    };
+    const bodyOf = (req, field) => {
+      if (!req.body || typeof req.body !== 'object') throw new AppError('VALIDATION_FAILED', 'JSON body required');
+      const unknown = Object.keys(req.body).filter((k) => k !== field && k !== 'ifRevision');
+      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in request', { unknown });
+      if (req.body[field] === undefined) throw new AppError('VALIDATION_FAILED', `"${field}" is required`);
+      return req.body[field];
+    };
+
+    router.put('/data/resources/:key', wrap(async (req, res) => {
+      send(res, opError(await resources.replace(req.params.key, bodyOf(req, 'data'), opts(req))));
+    }));
+    router.post('/data/resources/:key/items', wrap(async (req, res) => {
+      send(res, opError(await resources.createItem(req.params.key, bodyOf(req, 'item'), opts(req))));
+    }));
+    router.put('/data/resources/:key/items/:id', wrap(async (req, res) => {
+      send(res, opError(await resources.updateItem(req.params.key, req.params.id, bodyOf(req, 'item'), opts(req))));
+    }));
+    router.delete('/data/resources/:key/items/:id', wrap(async (req, res) => {
+      send(res, opError(await resources.deleteItem(req.params.key, req.params.id, opts(req))));
+    }));
+    router.post('/data/transactions', wrap(async (req, res) => {
+      send(res, opError(await resources.transaction(bodyOf(req, 'changes'), opts(req))));
+    }));
+    router.get('/data/resources/:key/compare', (req, res) => {
+      res.json(resources.compare(req.params.key));
+    });
+    router.get('/data/status', wrap(async (_req, res) => {
+      let catalogState;
+      try {
+        const list = resources.catalog.list();
+        catalogState = { ok: true, resources: list.length, imported: list.filter((e) => e.status === 'imported').length };
+      } catch (err) {
+        catalogState = { ok: false, error: sanitizeError(err) };
+      }
+      res.json({ repository: await dataRepo.status(), catalog: catalogState });
+    }));
+    router.get('/data/operations', (req, res) => {
+      const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 50, 1), 200);
+      const kind = req.query.kind === 'sync' || req.query.kind === 'mutation' ? req.query.kind : undefined;
+      res.json({ operations: dataRepo.listOps({ limit, kind }) });
+    });
+    router.get('/data/operations/:id', (req, res) => {
+      const op = dataRepo.getOp(req.params.id);
+      if (!op) throw new AppError('RESOURCE_NOT_FOUND', 'Data operation not found');
+      res.json(op);
+    });
+    router.post('/data/operations/:id/retry', wrap(async (req, res) => {
+      const op = await dataRepo.retry(req.params.id);
+      res.status(op.status === 'pending-push' ? 202 : op.status === 'blocked' || op.status === 'failed' ? 409 : 200).json(op);
+    }));
+  }
+
+  // ── Content domains: Stage 8 (legacy Manage keeps these meanwhile) ──────
   const later = (name) => (_req, res) => res.status(501).json({ code: 'NOT_IMPLEMENTED', message: `Not implemented yet: ${name}` });
   router.get('/home', later('GET /home'));
   router.get('/blog/categories', later('GET /blog/categories'));
@@ -219,7 +311,6 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
   router.get('/projects', later('GET /projects'));
   router.get('/photos', later('GET /photos'));
   router.get('/minis/posts', later('GET /minis/posts'));
-  router.get('/data/resources', later('GET /data/resources'));
 
   router.use((_req, res) => res.status(404).json({ code: 'RESOURCE_NOT_FOUND', message: 'Not found' }));
 

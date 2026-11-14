@@ -73,7 +73,7 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
         ? new AppError('UNAUTHENTICATED', 'Authentication required')
         : new AppError('FORBIDDEN', 'This token does not grant write access to this resource', { key: e.key });
     }
-    if (e.format !== 'json') throw new AppError('OPERATION_NOT_ALLOWED', 'Only JSON resources are writable through this API', { key: e.key });
+    if (e.format !== 'json' && e.format !== 'markdown') throw new AppError('OPERATION_NOT_ALLOWED', 'This resource format is not writable through the API', { key: e.key });
     return e;
   }
 
@@ -86,6 +86,8 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
     if (e.status !== 'imported') throw new AppError('RESOURCE_NOT_FOUND', 'Resource is mapped but not imported yet', { key: e.key, status: e.status });
     const text = dataRepo.readText(e.relPath);
     if (text === null) throw new AppError('DATA_INTEGRITY', 'Canonical file is missing', { key: e.key, reason: 'missing' });
+    // Markdown documents are returned verbatim as a string.
+    if (e.format === 'markdown') return { doc: text, revision: sha256(text) };
     let doc;
     try {
       doc = JSON.parse(text);
@@ -105,13 +107,20 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
   }
 
   function validateDoc(e, doc) {
+    if (e.format === 'markdown') {
+      if (typeof doc !== 'string') throw new AppError('VALIDATION_FAILED', 'A markdown document is a string', { key: e.key });
+      if (doc.length > 1_000_000 || doc.includes('\u0000')) throw new AppError('VALIDATION_FAILED', 'Markdown document too large or contains NUL', { key: e.key });
+      return;
+    }
     if (e.validate && !e.validate(doc)) {
       throw new AppError('VALIDATION_FAILED', 'Resulting document fails the resource schema', { key: e.key, errors: schemaErrors(e) });
     }
   }
 
-  const serialize = (doc) => JSON.stringify(doc, null, 2) + '\n';
+  // Markdown is stored verbatim (byte-exact round trips); JSON is pretty-printed.
+  const serialize = (e, doc) => (e.format === 'markdown' ? String(doc) : JSON.stringify(doc, null, 2) + '\n');
   const validatorFor = (e) => (_rel, content) => {
+    if (e.format === 'markdown') return validateDoc(e, content);
     let parsed;
     try {
       parsed = JSON.parse(content);
@@ -126,7 +135,7 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
     const op = await dataRepo.mutate({
       action,
       keys: [e.key],
-      changes: [{ relPath: e.relPath, content: nextDoc === null ? null : serialize(nextDoc), ...(expectRevision !== undefined ? { expectBefore: expectRevision } : {}) }],
+      changes: [{ relPath: e.relPath, content: nextDoc === null ? null : serialize(e, nextDoc), ...(expectRevision !== undefined ? { expectBefore: expectRevision } : {}) }],
       message,
       validate: validatorFor(e),
       idempotencyKey,
@@ -271,12 +280,20 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
         dataRepo.resourceLocks.withLocks(keys, async () => {
           const entries = keys.map((k) => writable(k, principal));
           const prepared = entries.map((e, i) => {
-            assertOp(e, e.status === 'absent' ? 'create' : 'replace');
-            validateDoc(e, changes[i].data);
+            const c = changes[i];
             const text = dataRepo.readText(e.relPath);
             const current = text === null ? null : sha256(text);
-            checkRevision(current, changes[i].ifRevision);
-            return { relPath: e.relPath, content: serialize(changes[i].data), expectBefore: current };
+            checkRevision(current, c.ifRevision);
+            // { key, delete: true } removes a collection member in the same commit.
+            if (c.delete === true) {
+              if (!e.collectionKey) throw new AppError('OPERATION_NOT_ALLOWED', 'Only collection members can be deleted', { key: e.key });
+              assertOp(e, 'delete');
+              if (e.status !== 'imported') throw new AppError('RESOURCE_NOT_FOUND', 'Resource does not exist', { key: e.key });
+              return { relPath: e.relPath, content: null, expectBefore: current };
+            }
+            assertOp(e, e.status === 'absent' ? 'create' : 'replace');
+            validateDoc(e, c.data);
+            return { relPath: e.relPath, content: serialize(e, c.data), expectBefore: current };
           });
           const byRel = new Map(entries.map((e) => [e.relPath, e]));
           const op = await dataRepo.mutate({

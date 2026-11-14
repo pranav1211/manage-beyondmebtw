@@ -4,6 +4,7 @@
 // called server-side through argus-client.js.
 
 import express from 'express';
+import { randomBytes } from 'node:crypto';
 import { AppError, ERROR_CODES, sanitizeError } from '../../../shared/errors.js';
 import { ARGUS_OPERATIONS } from '../../../shared/contracts/manage-argus.js';
 import { validateRegistryEntry } from '../../../shared/schemas/index.js';
@@ -95,6 +96,61 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     const s = sessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
     res.json(s ? { authenticated: true, csrfToken: s.csrf } : { authenticated: false });
   });
+
+  // ── Sign in with Manage (for core apps' own editors) ────────────────────
+  // 1. The app sends the browser to GET /auth/app-login?app=<application>&return=<https URL on
+  //    that app's registered domain>.
+  // 2. Without a Manage session the browser goes to the Manage login first and comes back.
+  // 3. With one, Manage redirects to `return` with a one-time code (60 s, single use, bound to
+  //    the application).
+  // 4. The app's SERVER exchanges the code with POST /auth/app-login/exchange using its own
+  //    Manage API token, then runs its own session. No cookie is shared across subdomains.
+  if (apiClients) {
+    const codes = new Map(); // code -> { application, exp }
+    const CODE_TTL_MS = 60_000;
+    const sweep = () => { const now = Date.now(); for (const [k, v] of codes) if (v.exp < now) codes.delete(k); };
+
+    router.get('/auth/app-login', (req, res) => {
+      const entry = registry.get(String(req.query.app || ''));
+      if (!entry || !entry.enabled) return res.status(404).json({ code: 'UNKNOWN_TARGET', message: 'Unknown or disabled application' });
+      if (!apiClients.list().some((c) => c.application === entry.application && !c.revoked)) {
+        return res.status(409).json({ code: 'CONFLICT', message: 'This application has no Manage API token; issue one first' });
+      }
+      let ret;
+      try {
+        ret = new URL(String(req.query.return || ''));
+      } catch {
+        return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'return must be an absolute URL' });
+      }
+      // Only back to the application's own registered domain, over HTTPS (no open redirect).
+      if (ret.protocol !== 'https:' || ret.hostname !== entry.domain || ret.port || ret.username || ret.password) {
+        return res.status(400).json({ code: 'VALIDATION_FAILED', message: "return must be an https URL on the application's registered domain" });
+      }
+      if (!sessionOf(req)) {
+        return res.redirect(302, `/#/login?next=${encodeURIComponent(req.originalUrl)}`);
+      }
+      sweep();
+      const code = randomBytes(32).toString('base64url');
+      codes.set(code, { application: entry.application, exp: Date.now() + CODE_TTL_MS });
+      ret.searchParams.set('code', code);
+      res.set('Cache-Control', 'no-store');
+      return res.redirect(302, ret.toString());
+    });
+
+    router.post('/auth/app-login/exchange', (req, res) => {
+      const h = String(req.get('authorization') || '');
+      const client = h.startsWith('Bearer ') ? apiClients.verify(h.slice(7).trim()) : null;
+      if (!client) return res.status(401).json({ code: 'UNAUTHENTICATED', message: 'Invalid or revoked API token' });
+      sweep();
+      const code = String((req.body && req.body.code) || '');
+      const found = codes.get(code);
+      codes.delete(code); // single use, even when the check below fails
+      if (!found || found.application !== client.application) {
+        return res.status(401).json({ code: 'UNAUTHENTICATED', message: 'Invalid, expired or already-used code' });
+      }
+      return res.json({ ok: true, subject: 'admin', application: client.application, issuedAt: new Date().toISOString() });
+    });
+  }
 
   // ── Canonical data: public reads (private resources need a session) ─────
   // Catalog-gated: callers name a key, never a path. Private resources are

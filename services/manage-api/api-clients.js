@@ -29,7 +29,8 @@ export function scopeAllows(scopes, key, need) {
 }
 
 export function validateScopes(scopes) {
-  if (!Array.isArray(scopes) || scopes.length < 1 || scopes.length > 20) throw new AppError('VALIDATION_FAILED', 'scopes must be a list of 1-20 entries');
+  // [] = sign-in-only client (Sign in with Manage), no data access.
+  if (!Array.isArray(scopes) || scopes.length > 20) throw new AppError('VALIDATION_FAILED', 'scopes must be a list of 0-20 entries');
   return scopes.map((s) => {
     if (!s || typeof s !== 'object' || Array.isArray(s)) throw new AppError('VALIDATION_FAILED', 'Each scope is { resource, access }');
     const unknown = Object.keys(s).filter((k) => k !== 'resource' && k !== 'access');

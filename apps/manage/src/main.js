@@ -58,6 +58,22 @@ async function guarded(fn) {
 }
 
 // ── login ─────────────────────────────────────────────────────────────────
+// "Sign in with Manage": an app sent the browser here (#/login?next=/api/v1/auth/app-login?...).
+// Once signed in, continue to that URL — and ONLY to Manage's own app-login path.
+function continueAppLogin() {
+  const m = /^#\/login\?next=(.+)$/.exec(location.hash);
+  if (!m) return false;
+  let next;
+  try {
+    next = decodeURIComponent(m[1]);
+  } catch {
+    return false;
+  }
+  if (!next.startsWith('/api/v1/auth/app-login?')) return false;
+  location.replace(next);
+  return true;
+}
+
 function showLogin(message) {
   stopPolling();
   topbar.classList.add('hidden');
@@ -75,6 +91,7 @@ function showLogin(message) {
     const pw = new FormData(e.target).get('password');
     try {
       await api.login(String(pw));
+      if (continueAppLogin()) return;
       topbar.classList.remove('hidden');
       route();
     } catch (err) {
@@ -616,6 +633,7 @@ window.addEventListener('hashchange', route);
   try {
     const s = await api.session();
     if (!s.authenticated) return showLogin();
+    if (continueAppLogin()) return;
     topbar.classList.remove('hidden');
     route();
   } catch {

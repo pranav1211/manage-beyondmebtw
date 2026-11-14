@@ -4,7 +4,7 @@
   "processes": [
     {
       "name": "manage-api",
-      "script": "services/manage-api/index.js",
+      "script": "services/manage-api/main.js",
       "cwd": "/projects/manage",
       "interpreter": "node",
       "execMode": "fork",
@@ -14,7 +14,7 @@
     },
     {
       "name": "argus",
-      "script": "services/argus/argus.js",
+      "script": "services/argus/main.js",
       "cwd": "/projects/manage",
       "execMode": "fork",
       "instances": 1,

@@ -10,8 +10,8 @@
   "scripts": {
     "dev:web": "vite",
     "build:web": "vite build",
-    "dev:api": "node services/manage-api/index.js",
-    "dev:argus": "node services/argus/argus.js",
+    "dev:api": "node services/manage-api/main.js",
+    "dev:argus": "node services/argus/main.js",
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\"",
     "lint": "eslint .",
     "validate": "node scripts/validate.js",

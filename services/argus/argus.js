@@ -15,7 +15,6 @@
 // own PM2 entry is part of the documented bootstrap). It is never used to
 // hand-author another application's PM2 config — those are Argus-generated.
 
-import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import express from 'express';
@@ -269,8 +268,4 @@ export function start(config = loadConfig({ service: 'argus' })) {
       `[argus] listening on ${config.argusBind}:${config.argusPort} (mode=${config.argus.mode}, execution=${config.argus.executionEnabled ? 'ENABLED' : 'disabled'})`
     );
   });
-}
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  start();
 }

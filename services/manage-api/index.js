@@ -92,7 +92,3 @@ export function start(config = loadConfig({ service: 'manage' })) {
     console.log(`[manage-api] listening on 127.0.0.1:${config.manageApiPort} (${config.nodeEnv})`);
   });
 }
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  start();
-}

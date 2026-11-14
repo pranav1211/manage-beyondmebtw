@@ -9,7 +9,7 @@
   "pm2Config": "manage-beyondmebtw.config.js",
   "nginxConfig": "manage.conf",
   "runtime": {
-    "script": "services/manage-api/index.js",
+    "script": "services/manage-api/main.js",
     "port": 7100,
     "healthPath": "/health",
     "envFile": true

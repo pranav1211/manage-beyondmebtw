@@ -390,6 +390,83 @@ async function registry(editName) {
   });
 }
 
+// ── canonical data (bmb-data) ─────────────────────────────────────────────
+const short = (sha) => (sha ? `<code>${esc(String(sha).slice(0, 12))}</code>` : '—');
+
+async function dataPage(compareKey) {
+  const [st, res, ops] = await Promise.all([api.dataStatus(), api.dataResources(), api.dataOperations(30)]);
+  const r = st.repository;
+  const cmp = compareKey ? await api.dataCompare(compareKey).catch((err) => ({ error: err })) : null;
+  setView(`
+    <h1>Canonical data</h1>
+    ${r.blocked ? `<div class="banner bad"><strong>${esc(r.blocked)} blocked operation(s)</strong> — needs an explicit resolution.</div>` : ''}
+    ${r.pendingPush ? `<div class="banner warn"><strong>${esc(r.pendingPush)} change(s) committed but not pushed</strong> to bmb-data yet.</div>` : ''}
+    ${st.catalog.ok ? '' : `<div class="banner bad">Catalog invalid: ${esc(st.catalog.error && st.catalog.error.code)}</div>`}
+    <section class="card"><h2>bmb-data checkout</h2><dl class="kv">
+      <dt>Branch</dt><dd>${esc(r.branch)}</dd>
+      <dt>Local HEAD</dt><dd>${short(r.head)}</dd>
+      <dt>Remote (last fetched)</dt><dd>${short(r.remote)} ${r.head && r.head === r.remote ? badge('ok', 'in sync') : badge('unknown', 'differs')}</dd>
+      <dt>Working tree</dt><dd>${r.dirty === null ? badge('unknown') : r.dirty ? badge('blocked', 'dirty') : badge('ok', 'clean')}</dd>
+      <dt>Last webhook sync</dt><dd>${r.lastSync ? `${badge(r.lastSync.status)} ${esc(r.lastSync.result ? r.lastSync.result.state : '')} · ${time(r.lastSync.createdAt)}` : '—'}</dd>
+      <dt>Catalog</dt><dd>${st.catalog.ok ? `${esc(st.catalog.resources)} resources · ${esc(st.catalog.imported)} imported` : '—'}</dd>
+    </dl></section>
+    <section class="card"><h2>Resources</h2>
+      <table><thead><tr><th>Key</th><th>Access</th><th>Status</th><th>Path</th><th>Source</th><th></th></tr></thead><tbody>
+      ${res.resources.map((x) => `<tr><td><code>${esc(x.key)}</code></td><td>${badge(x.access === 'private' ? 'blocked' : 'ok', x.access)}</td><td>${badge(x.status === 'imported' ? 'succeeded' : 'pending', x.status)}</td><td><code>${esc(x.path)}</code></td><td>${x.source ? `<code>${esc(x.source.repository)}:${esc(x.source.path)}</code>` : '—'}</td><td>${x.status === 'imported' ? `<a class="btn" href="#/data/res/${encodeURIComponent(x.key)}">Open</a> ` : ''}${x.source ? `<a class="btn" href="#/data/compare/${encodeURIComponent(x.key)}">Compare</a>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No catalog yet.</td></tr>'}
+      </tbody></table></section>
+    ${cmp ? `<section class="card"><h2>Comparison: <code>${esc(compareKey)}</code></h2>${cmp.error ? errorBanner(cmp.error) : `<p>${cmp.identical ? badge('ok', 'identical') : badge('mismatch', 'differs')} · source ${esc(cmp.source.count ?? '—')} · target ${esc(cmp.target.present ? cmp.target.count : 'not imported')}</p>${json(cmp)}`}</section>` : ''}
+    <section class="card"><h2>Data operations</h2><div id="data-retry"></div>
+      <table><thead><tr><th>When</th><th>Action</th><th>Resources</th><th>Status</th><th>Phase</th><th>Commit</th><th></th></tr></thead><tbody>
+      ${ops.operations.map((o) => `<tr><td>${time(o.createdAt)}</td><td>${esc(o.action)}</td><td>${esc((o.keys || []).join(', ') || (o.result && o.result.state) || '')}</td><td>${badge(o.status)}</td><td>${esc(o.phase || '—')}</td><td>${short(o.commit || (o.result && o.result.to))}</td><td>${['pending-push', 'failed', 'blocked'].includes(o.status) && o.kind === 'mutation' ? `<button class="btn" data-retry="${esc(o.operationId)}">Retry</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No data operations yet.</td></tr>'}
+      </tbody></table></section>`);
+  view.querySelectorAll('button[data-retry]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const out = document.getElementById('data-retry');
+      try {
+        const op = await api.dataRetry(b.dataset.retry);
+        out.innerHTML = `<div class="banner ${op.status === 'succeeded' ? 'info' : 'warn'}">${esc(op.operationId)}: ${esc(op.status)}</div>`;
+        setTimeout(() => guarded(() => dataPage(compareKey)), 800);
+      } catch (err) {
+        out.innerHTML = errorBanner(err);
+      }
+    })
+  );
+}
+
+async function dataResource(key) {
+  const r = await api.dataResource(key);
+  setView(`
+    <p><a href="#/data">← Data</a></p>
+    <h1><code>${esc(key)}</code></h1>
+    <section class="card"><dl class="kv"><dt>Revision</dt><dd><code>${esc(r.revision.slice(0, 16))}</code></dd></dl>
+      <form class="stack" id="res-form">
+        <label>Document (JSON) <textarea name="doc" rows="22" spellcheck="false">${esc(JSON.stringify(r.data, null, 2))}</textarea></label>
+        <button class="btn primary" type="submit">Save to bmb-data</button>
+      </form>
+      <div id="res-result"></div></section>`);
+  document.getElementById('res-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const out = document.getElementById('res-result');
+    let data;
+    try {
+      data = JSON.parse(new FormData(e.target).get('doc'));
+    } catch {
+      out.innerHTML = '<div class="banner bad">Not valid JSON — nothing was sent.</div>';
+      return;
+    }
+    try {
+      const res = await api.dataReplace(key, data, r.revision);
+      const p = res.persistence;
+      out.innerHTML = p.saved
+        ? `<div class="banner info">${p.status === 'noop' ? 'No change.' : 'Saved, pushed and read back from bmb-data'} ${p.commit ? `· <code>${esc(p.commit.slice(0, 12))}</code>` : ''}</div>`
+        : `<div class="banner warn">Committed locally but <strong>not pushed yet</strong> (${esc(p.error && p.error.code)}) — retry from the Data page.</div>`;
+      if (p.saved) setTimeout(() => guarded(() => dataResource(key)), 1200);
+    } catch (err) {
+      out.innerHTML = errorBanner(err);
+    }
+  });
+}
+
 // ── router ────────────────────────────────────────────────────────────────
 function route() {
   stopPolling();
@@ -402,6 +479,8 @@ function route() {
   if (parts[0] === 'ops') return guarded(() => (parts[1] ? opDetail(parts[1]) : opsList()));
   if (parts[0] === 'reconcile') return guarded(reconcile);
   if (parts[0] === 'registry') return guarded(() => registry(parts[2] === 'edit' ? parts[1] : null));
+  if (parts[0] === 'data' && parts[1] === 'res' && parts[2]) return guarded(() => dataResource(parts[2]));
+  if (parts[0] === 'data') return guarded(() => dataPage(parts[1] === 'compare' ? parts[2] : null));
   setView('<div class="empty">Not found.</div>');
 }
 

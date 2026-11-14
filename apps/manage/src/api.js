@@ -60,5 +60,12 @@ export const api = {
   submit: (operation, application, params) =>
     call('POST', '/operations', { operation, application, ...(params ? { params } : {}) }),
   reconcileApp: (name) => call('POST', `/reconcile/${encodeURIComponent(name)}`, {}),
-  reconcileAll: (confirm) => call('POST', '/reconcile', { confirm })
+  reconcileAll: (confirm) => call('POST', '/reconcile', { confirm }),
+  dataStatus: () => call('GET', '/data/status'),
+  dataResources: () => call('GET', '/data/resources'),
+  dataOperations: (limit = 30) => call('GET', `/data/operations?limit=${limit}`),
+  dataRetry: (id) => call('POST', `/data/operations/${encodeURIComponent(id)}/retry`, {}),
+  dataCompare: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}/compare`),
+  dataResource: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}`),
+  dataReplace: (key, data, ifRevision) => call('PUT', `/data/resources/${encodeURIComponent(key)}`, { data, ifRevision })
 };

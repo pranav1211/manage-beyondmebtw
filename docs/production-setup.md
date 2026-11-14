@@ -74,6 +74,34 @@ MANAGE_ADMIN_PASSWORD_HASH='<scrypt hash>' # node scripts/hash-password.mjs — 
 8. `pm2 save` (after comparing the process list).
 9. (root) Install `manage.conf` for `manage.beyondmebtw.com`; `nginx -t`; reload.
 
+## Webhooks (live)
+
+| Repo | URL | Handler |
+|---|---|---|
+| `manage-beyondmebtw` (and later each code app) | `https://manage.beyondmebtw.com/webhooks/argus` | nginx exact `POST` location → Argus `127.0.0.1:6040/webhook` (HMAC-verified, deploys) |
+| `bmb-data` | `https://manage.beyondmebtw.com/api/v1/webhooks/bmb-data` | Manage: HMAC-verified fast-forward of `/infrastructure/bmb-data` under the data Git lock; never deploys anything |
+
+Secret: `WEBHOOK_DEFAULT_SECRET` in **both** `argus.env` and
+`manage-beyondmebtw.env` (per-app overrides: registry `webhookSecretRef`;
+bmb-data override: `BMB_DATA_WEBHOOK_SECRET`). A push to `manage-beyondmebtw`
+`main` deploys production Manage.
+
+## Canonical data (bmb-data)
+
+- Catalog: `bmb-data/catalog/catalog.json` + `catalog/schemas/*.schema.json`
+  (developer-authored, changed by commits to bmb-data; the webhook syncs them).
+  Resources live under `data/` or `content/`; `registry/` is separate.
+- Manage is the only application writer. Every write (registry or data) is a
+  journaled operation under one Git lock: validate → atomic replace → exact-path
+  commit → push (never forced) → remote read-back. State, journal and history:
+  `$LOGS_ROOT/manage` (= `/infrastructure/logs/manage`; override `MANAGE_STATE_ROOT`).
+- Interrupted operations are recovered at Manage start-up, before it serves.
+- A failed push = `pending-push` (HTTP 202, not "saved"); retry from the Data
+  page or `POST /api/v1/data/operations/:id/retry`. Divergence = `blocked`; fix
+  by hand (never reset/force automatically).
+- Comparison mode needs read-only source checkouts in `manage-beyondmebtw.env`:
+  `DATA_SOURCE_ROOTS=pranav1211/Beyondmebtw=/bmbsifi/Beyondmebtw;pranav1211/PhotosBMB=/proj/photos`
+
 ## Operational notes (learned establishing Stage 5 live)
 
 - **Entry points:** PM2 runs `services/argus/main.js` and

@@ -94,11 +94,13 @@ tr.clickable:hover td { background: var(--surface-2); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 form.stack { display: grid; gap: 10px; max-width: 640px; }
 label { display: grid; gap: 4px; color: var(--muted); font-size: 0.88rem; }
-input, select {
+input, select, textarea {
   background: var(--surface-2); color: var(--text); border: 1px solid var(--line);
   border-radius: 7px; padding: 8px 10px; font: inherit;
 }
-input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.82rem; width: 100%; resize: vertical; }
+#res-form { max-width: none; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .check { display: flex; gap: 8px; align-items: center; color: var(--text); }
 

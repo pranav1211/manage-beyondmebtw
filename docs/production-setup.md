@@ -74,6 +74,25 @@ MANAGE_ADMIN_PASSWORD_HASH='<scrypt hash>' # node scripts/hash-password.mjs — 
 8. `pm2 save` (after comparing the process list).
 9. (root) Install `manage.conf` for `manage.beyondmebtw.com`; `nginx -t`; reload.
 
+## Operational notes (learned establishing Stage 5 live)
+
+- **Entry points:** PM2 runs `services/argus/main.js` and
+  `services/manage-api/main.js`. Never point PM2 at `argus.js` / `index.js`:
+  they are libraries and do not start a server (under PM2 fork mode
+  `process.argv[1]` is PM2's container, so "is main module" checks never fire).
+- **Argus starts apps with an empty inherited env** (`filter_env: ['']` + a fixed
+  system allowlist). Do not change this: Argus itself runs under PM2, and any
+  inherited `pm_*`/`name` keys make PM2 treat a new app as Argus's own entry.
+  If `pm2 jlist` ever shows `argus` carrying another app's `PORT` or
+  `ARGUS_CONFIG_HASH`, the entry was hijacked: `pm2 delete argus`, kill any
+  orphaned `node /infrastructure/argus/services/argus/main.js`, start from
+  `argus.config.js` again.
+- **Nginx convention on this VM is inverted:** real files live in
+  `/etc/nginx/sites-enabled/`, and `sites-available/` holds symlinks into it.
+  Replace a host's file in place in `sites-enabled`; keep backups **outside**
+  `sites-enabled` (nginx includes `sites-enabled/*`).
+- `~/.pm2/dump.pm2.pre-stage5` is the pre-Stage-5 resurrect list (9 legacy apps).
+
 ## Dependency changes
 
 Dependencies are installed as part of setup, not by deploys. If

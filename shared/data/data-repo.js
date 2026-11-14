@@ -73,7 +73,8 @@ export function createDataRepo({
   faults = null,
   pushAttempts = 3,
   pushBackoffMs = [500, 1500],
-  lockTimeoutMs = 60_000
+  lockTimeoutMs = 60_000,
+  sshMultiplex = true
 }) {
   if (!root || !stateRoot || !expectedRemote) throw new AppError('CONFIG_INVALID', 'DataRepo requires root, stateRoot and expectedRemote');
   const relState = relative(resolve(root), resolve(stateRoot));
@@ -98,8 +99,15 @@ export function createDataRepo({
   const fault = async (point, op, i) => { if (faults) await faults(point, op, i); };
 
   // ── Git ─────────────────────────────────────────────────────────────────
+  // Reuse one SSH connection to GitHub across an operation's round trips
+  // (handshake ≈ 1.4 s of each ≈ 2.3 s round trip). POSIX only; local/file
+  // remotes (tests) never invoke ssh.
+  const sshEnv =
+    sshMultiplex && process.platform !== 'win32' && /^(git@|ssh:\/\/)/.test(String(expectedRemote))
+      ? { GIT_SSH_COMMAND: `ssh -o BatchMode=yes -o ControlMaster=auto -o ControlPersist=120 -o ControlPath=${join(stateRoot, 'ssh-%C')}` }
+      : {};
   async function git(args, { allowFail = false } = {}) {
-    const r = await run('git', ['-C', root, ...args]);
+    const r = await run('git', ['-C', root, ...args], { env: sshEnv });
     if (r.code !== 0 && !allowFail) throw new AppError('GIT_FAILED', `git ${args[0]} failed`, { output: tail(r.stderr || r.stdout) });
     return r;
   }
@@ -128,10 +136,14 @@ export function createDataRepo({
     await assertIdentity();
     const dirty = await dirtyPaths();
     if (dirty.length) throw new AppError('DATA_REPO_DIRTY', 'Repository has unexpected local changes; refusing to write', { paths: dirty.slice(0, 20) });
-    const ls = await git(['ls-remote', '--heads', 'origin', branch], { allowFail: true });
-    if (ls.code !== 0) return { remoteReachable: false };
-    if (ls.stdout.trim() === '') return { remoteReachable: true, remoteHasBranch: false };
-    await git(['fetch', '-q', 'origin', branch]);
+    // One round trip in the normal case; ls-remote only to explain a failed fetch.
+    const f = await git(['fetch', '-q', 'origin', branch], { allowFail: true });
+    if (f.code !== 0) {
+      const ls = await git(['ls-remote', '--heads', 'origin', branch], { allowFail: true });
+      if (ls.code !== 0) return { remoteReachable: false };
+      if (ls.stdout.trim() === '') return { remoteReachable: true, remoteHasBranch: false };
+      throw new AppError('GIT_FAILED', 'git fetch failed', { output: tail(f.stderr || f.stdout) });
+    }
     const local = await revOrNull('HEAD');
     if (!local) {
       await git(['checkout', '-q', '-B', branch, `origin/${branch}`]);
@@ -234,7 +246,14 @@ export function createDataRepo({
   }
 
   /** @returns {'pushed'|'already'|'pending'} */
-  async function stepPush(op) {
+  async function stepPush(op, { fresh = false } = {}) {
+    // fresh = preflight fetched moments ago under this same lock: push directly
+    // (a rejection still blocks). Retries/recovery re-check the remote first.
+    if (!fresh) return stepPushChecked(op);
+    return pushLoop(op);
+  }
+
+  async function stepPushChecked(op) {
     const ls = await git(['ls-remote', '--heads', 'origin', branch], { allowFail: true });
     if (ls.code !== 0) {
       op.lastError = { code: 'GIT_FAILED', message: 'Remote unavailable; commit kept locally and retryable', details: { output: tail(ls.stderr) } };
@@ -254,6 +273,10 @@ export function createDataRepo({
         });
       }
     }
+    return pushLoop(op);
+  }
+
+  async function pushLoop(op) {
     let out = '';
     for (let attempt = 1; attempt <= pushAttempts; attempt++) {
       op.pushAttempts = (op.pushAttempts || 0) + 1;
@@ -270,9 +293,15 @@ export function createDataRepo({
     return 'pending';
   }
 
+  // Remote read-back: GitHub's branch tip (ls-remote) must contain the commit.
+  // Objects are content-addressed, so the file hashes at that commit ARE the
+  // remote content. Fetch only if the tip is unknown locally (someone pushed after).
   async function stepVerify(op) {
-    await git(['fetch', '-q', 'origin', branch]);
-    if (!(await isAncestor(op.commit, `origin/${branch}`))) {
+    const ls = await git(['ls-remote', '--heads', 'origin', branch]);
+    const tip = ls.stdout.trim().split(/\s+/)[0] || null;
+    if (!tip) throw new AppError('DATA_REPO_DIVERGED', 'Remote branch is missing after push', { commit: op.commit });
+    if ((await git(['cat-file', '-e', `${tip}^{commit}`], { allowFail: true })).code !== 0) await git(['fetch', '-q', 'origin', branch]);
+    if (!(await isAncestor(op.commit, tip))) {
       throw new AppError('DATA_REPO_DIVERGED', 'Commit is not on the remote branch after push', { commit: op.commit });
     }
     for (const c of op.changes) {
@@ -298,7 +327,7 @@ export function createDataRepo({
   }
 
   /** Drive an op from its current phase to a terminal/pending state. Never throws (except SimulatedCrash). */
-  async function advance(op) {
+  async function advance(op, { fresh = false } = {}) {
     try {
       if (rank(op.phase) < rank('applied')) {
         await stepApply(op);
@@ -314,7 +343,7 @@ export function createDataRepo({
         await fault('committed', op);
       }
       if (rank(op.phase) < rank('pushed')) {
-        const r = await stepPush(op);
+        const r = await stepPush(op, { fresh });
         if (r === 'pending') {
           op.status = 'pending-push';
           return saveOp(op);
@@ -436,7 +465,7 @@ export function createDataRepo({
         }
         throw new AppError('INTERNAL', 'Data operation failed', { operationId: op.operationId });
       }
-      return advance(op);
+      return advance(op, { fresh: true });
     }, lockTimeoutMs);
   }
 

@@ -315,6 +315,11 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     res.json(await registry.setEnabled(req.params.app, req.body && req.body.enabled));
   }));
 
+  // Auto-deploy on push: off = pushes are recorded only; deploy/restart manually.
+  router.patch('/registry/:app/auto-deploy', wrap(async (req, res) => {
+    res.json(await registry.setAutoDeploy(req.params.app, req.body && req.body.autoDeploy));
+  }));
+
   router.post('/registry/retry-push', wrap(async (_req, res) => {
     res.json(await registry.retryPush());
   }));

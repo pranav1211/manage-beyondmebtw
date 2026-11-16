@@ -304,8 +304,9 @@ async function appDetail(name) {
 
   setView(`
     <h1>${esc(entry.application)}</h1>
-    <p class="sub">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.environment === 'test' ? badge('test', 'test target') : ''}</p>
+    <p class="sub">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.environment === 'test' ? badge('test', 'test target') : ''} ${entry.autoDeploy === false ? badge('pending', 'auto-deploy off') : badge('ok', 'auto-deploy on')}</p>
     ${st.unavailable ? `<div class="banner bad">Argus unavailable (${esc(st.code)}) — runtime state unknown.</div>` : ''}
+    ${st.undeployedPush ? `<div class="banner warn">Pushed but <strong>not deployed</strong> (auto-deploy is off): <code>${esc(st.undeployedPush.commit.slice(0, 12))}</code> · ${time(st.undeployedPush.at)}. Use <strong>Deploy (latest)</strong> to deploy it, or <strong>Restart</strong> to restart without deploying.</div>` : ''}
     ${exec && !exec.ok ? `<div class="banner warn">Argus will refuse operations: <strong>${esc(exec.code)}</strong> — ${esc(exec.reason)}</div>` : ''}
     <div class="grid">
       <div class="card"><h3>Registry (authoritative)</h3><dl class="kv">
@@ -324,6 +325,7 @@ async function appDetail(name) {
     <h2>Actions</h2>
     <div class="actions">${actions}
       <button class="btn ghost" id="toggle-enabled">${entry.enabled ? 'Disable' : 'Enable'}</button>
+      <button class="btn ghost" id="toggle-autodeploy">${entry.autoDeploy === false ? 'Turn auto-deploy on' : 'Turn auto-deploy off'}</button>
       <a class="btn ghost" href="#/registry/${encodeURIComponent(entry.application)}/edit">Edit registry entry</a>
     </div>
     <div id="action-result"></div>
@@ -353,6 +355,21 @@ async function appDetail(name) {
     const out = document.getElementById('action-result');
     try {
       const r = await api.setEnabled(entry.application, !entry.enabled);
+      out.innerHTML = persistenceNote(r.persistence);
+      setTimeout(() => guarded(() => appDetail(name)), 1200);
+    } catch (err) {
+      out.innerHTML = errorBanner(err);
+    }
+  });
+  document.getElementById('toggle-autodeploy').addEventListener('click', async () => {
+    const turnOn = entry.autoDeploy === false;
+    const msg = turnOn
+      ? `Turn auto-deploy ON for ${entry.application}? Every push to ${entry.branch} will deploy and restart it.`
+      : `Turn auto-deploy OFF for ${entry.application}? Pushes will only be recorded; you deploy/restart manually.`;
+    if (!window.confirm(msg)) return;
+    const out = document.getElementById('action-result');
+    try {
+      const r = await api.setAutoDeploy(entry.application, turnOn);
       out.innerHTML = persistenceNote(r.persistence);
       setTimeout(() => guarded(() => appDetail(name)), 1200);
     } catch (err) {

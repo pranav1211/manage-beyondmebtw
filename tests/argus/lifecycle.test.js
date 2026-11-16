@@ -189,6 +189,47 @@ test('new code commit redeploys; unchanged PM2 config makes no Config Repo commi
   assert.equal(git(cfgRepo.bare, ['rev-parse', 'HEAD']), cfgHead);
 });
 
+test('auto-deploy off: a push is only recorded (no sync, no restart); manual deploy works; on again resumes', async () => {
+  const setAuto = (value) => {
+    const entries = [eOk, eBad, eTwo, eStatic].map((e) => (e.application === 'node-ok' ? { ...e, autoDeploy: value } : e));
+    writeRegistry(root, entries);
+  };
+  setAuto(false);
+  try {
+    const [before] = await pm2Describe(['node-ok']);
+    const head = commitAndPush(repos['node-ok'], { 'README.md': 'v3 - pushed while auto-deploy is off\n' }, 'off push');
+    const r = await webhook('node-ok', head);
+    assert.equal(r.status, 200);
+    assert.equal(r.body.noop, true);
+    assert.equal(r.body.reason, 'auto-deploy-off');
+    const rec = await waitForOp(s.base, TOKEN, r.body.operationId);
+    assert.equal(rec.result.pushedCommit, head);
+    const [after] = await pm2Describe(['node-ok']);
+    assert.equal(after.pid, before.pid, 'process not restarted');
+    assert.equal(after.revision, before.revision, 'still running the previous revision');
+    assert.notEqual(git(join(projects, 'node-ok'), ['rev-parse', 'HEAD']), head, 'checkout not synced');
+    const status = await (await fetch(`${s.base}/apps/node-ok/status`, { headers: auth })).json();
+    assert.equal(status.autoDeploy, false);
+    assert.equal(status.undeployedPush.commit, head, 'the waiting push is reported');
+
+    // Manual redeploy (dashboard "Deploy (latest)") deploys it.
+    const manual = await waitForOp(s.base, TOKEN, await op('deploy', 'node-ok'));
+    assert.equal(manual.status, 'succeeded', JSON.stringify(manual.error));
+    assert.equal(manual.result.revision, head);
+    const [deployed] = await pm2Describe(['node-ok']);
+    assert.equal(deployed.revision, head);
+    const status2 = await (await fetch(`${s.base}/apps/node-ok/status`, { headers: auth })).json();
+    assert.equal(status2.undeployedPush, null, 'nothing waiting after the manual deploy');
+  } finally {
+    setAuto(true);
+  }
+  // Back on: pushes deploy again.
+  const head2 = commitAndPush(repos['node-ok'], { 'README.md': 'v4 - auto-deploy back on\n' }, 'on push');
+  const rec2 = await waitForOp(s.base, TOKEN, (await webhook('node-ok', head2)).body.operationId);
+  assert.equal(rec2.status, 'succeeded', JSON.stringify(rec2.error));
+  assert.equal(rec2.result.revision, head2);
+});
+
 test('declaration mismatch is surfaced and the registry stays authoritative', async () => {
   const decl = declarationFor(eOk, { script: 'server.js', port: 47101, healthPath: '/health' });
   const head = commitAndPush(repos['node-ok'], { 'argus.deploy.json': JSON.stringify({ ...decl, domain: 'tampered.example' }, null, 2) });

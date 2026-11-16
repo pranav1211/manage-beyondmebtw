@@ -323,12 +323,27 @@ export function createLifecycle(ctx) {
         processes = null; // unknown — never guessed
       }
     }
+    const deployed = store.getDeployed(application);
+    // Latest push that auto-deploy-off left undeployed (newer than the last deploy).
+    let undeployedPush = null;
+    if (entry.autoDeploy === false) {
+      const last = store
+        .list()
+        .filter((o) => o.application === application)
+        .reverse()
+        .find((o) => o.result && o.result.reason === 'auto-deploy-off');
+      if (last && last.result.pushedCommit !== (deployed && deployed.commit) && (!deployed || String(last.createdAt) > String(deployed.at))) {
+        undeployedPush = { commit: last.result.pushedCommit, at: last.createdAt };
+      }
+    }
     return {
       application,
       executable: exec,
+      autoDeploy: entry.autoDeploy !== false,
+      undeployedPush, // a push waiting for a manual deploy, or null
       declaration, // null = not deployed / not checked
       processes, // null = unknown
-      deployed: store.getDeployed(application)
+      deployed
     };
   }
 

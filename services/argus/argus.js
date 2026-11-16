@@ -155,6 +155,14 @@ export function createApp(config = loadConfig(), overrides = {}) {
       return res.status(200).json({ operationId: record.operationId, noop: true, reason: parsed.reason });
     }
 
+    // Auto-deploy switched off for this app (registry autoDeploy: false): the push is
+    // verified and recorded, but nothing is synced or restarted. Deploy/restart are
+    // then manual (dashboard), whenever the developer chooses.
+    if (ctx.loadRegistry().get(parsed.application).autoDeploy === false) {
+      ctx.store.succeed(record.operationId, { noop: true, reason: 'auto-deploy-off', pushedCommit: parsed.commit });
+      return res.status(200).json({ operationId: record.operationId, noop: true, reason: 'auto-deploy-off' });
+    }
+
     const submitted = scheduler.submit({
       operationId: record.operationId,
       operation: 'deploy',

@@ -73,3 +73,16 @@ test('refuses to write when the checkout has unexpected changes or wrong identit
   assert.equal(await codeOf(bad.create(registryEntry('x'))), 'DATA_REPO_UNAVAILABLE');
   assert.ok(existsSync(join(repo.checkout, 'registry', 'applications.json')));
 });
+
+test('auto-deploy flag: off is stored explicitly, on removes the field (default behaviour)', async () => {
+  const repo = makeEmptyDataRepo();
+  const s = store(repo);
+  await s.create(registryEntry('app-one'));
+  const off = await s.setAutoDeploy('app-one', false);
+  assert.equal(off.entry.autoDeploy, false);
+  assert.equal(JSON.parse(git(repo.bare, ['show', 'main:registry/applications.json'])).applications[0].autoDeploy, false);
+  const on = await s.setAutoDeploy('app-one', true);
+  assert.equal('autoDeploy' in on.entry, false);
+  assert.equal(await codeOf(s.setAutoDeploy('app-one', 'no')), 'VALIDATION_FAILED');
+  assert.equal(await codeOf(s.setAutoDeploy('ghost', false)), 'RESOURCE_NOT_FOUND');
+});

@@ -53,6 +53,7 @@ export const api = {
   createApp: (entry) => call('POST', '/registry', entry),
   updateApp: (name, entry) => call('PUT', `/registry/${encodeURIComponent(name)}`, entry),
   setEnabled: (name, enabled) => call('PATCH', `/registry/${encodeURIComponent(name)}/enabled`, { enabled }),
+  setAutoDeploy: (name, autoDeploy) => call('PATCH', `/registry/${encodeURIComponent(name)}/auto-deploy`, { autoDeploy }),
   retryPush: () => call('POST', '/registry/retry-push', {}),
   operations: (application, limit = 50) =>
     call('GET', `/operations?limit=${limit}${application ? `&application=${encodeURIComponent(application)}` : ''}`),

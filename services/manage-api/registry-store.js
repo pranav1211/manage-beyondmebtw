@@ -134,6 +134,19 @@ export function createRegistryStore({ dataRepo, root, branch = 'main', expectedR
         return { entry: next[i], persistence: await write(next, `manage: ${enabled ? 'enable' : 'disable'} ${application}`) };
       }),
 
+    /** Auto-deploy on push on/off (true = default behaviour; the field is dropped). */
+    setAutoDeploy: (application, autoDeploy) =>
+      locked(async () => {
+        if (typeof autoDeploy !== 'boolean') throw new AppError('VALIDATION_FAILED', '"autoDeploy" must be a boolean');
+        const apps = read();
+        const i = apps.findIndex((e) => e.application === application);
+        if (i === -1) throw new AppError('RESOURCE_NOT_FOUND', 'Application is not registered');
+        const next = [...apps];
+        const { autoDeploy: _old, ...rest } = apps[i];
+        next[i] = autoDeploy ? rest : { ...rest, autoDeploy: false };
+        return { entry: next[i], persistence: await write(next, `manage: auto-deploy ${autoDeploy ? 'on' : 'off'} for ${application}`) };
+      }),
+
     /** Push any pending registry/data commits (Stage 5 compatible). */
     async retryPush() {
       const results = await repo.retryPending();

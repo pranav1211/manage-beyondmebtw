@@ -30,7 +30,7 @@ CATALOG.resources.push({
   collection: { idPattern: '^p_[a-z0-9]+$' }, operations: ['read', 'replace', 'create', 'delete']
 });
 
-async function boot() {
+async function boot({ tokenLimits } = {}) {
   const files = seedFiles(CATALOG);
   files['data/seasons/2025.json'] = j({ items: [{ id: 'r1', text: 'race one' }] });
   files['registry/applications.json'] = j({ applications: [registryEntry('site-app'), registryEntry('other-app'), registryEntry('manage-beyondmebtw')] });
@@ -49,7 +49,8 @@ async function boot() {
       resources: createResourceStore({ dataRepo }),
       apiClients: createApiClients({ dataRepo }),
       envStore: createEnvStore({ envRoot }),
-      limiter: new LoginLimiter({ max: 100 })
+      limiter: new LoginLimiter({ max: 100 }),
+      ...(tokenLimits ? { tokenLimits } : {})
     })
   );
   servers.push(s);
@@ -204,4 +205,25 @@ test('Sign in with Manage: login redirect, code bound to the app + its domain, s
   assert.equal((await exchange(issued.body.token, code2)).status, 401, 'single use');
   assert.equal((await exchange('bmbm_c_000000000000_' + 'A'.repeat(43), code2)).status, 401);
   assert.equal((await as(issued.body.token)('PUT', '/data/resources/notes', { data: { items: [] } })).status, 403, 'sign-in-only token has no data access');
+});
+
+test('rate limits: per app token; 429 + Retry-After before any write; public reads and admin unaffected', async () => {
+  const { admin, as, repo, base } = await boot({ tokenLimits: { write: { perMinute: 1, burst: 3 }, read: { perMinute: 1, burst: 5 } } });
+  const t = (await admin('POST', '/apps/site-app/token', { scopes: [{ resource: 'notes', access: ['read', 'write'] }] })).body.token;
+  const app = as(t);
+  const before = Number(git(repo.bare, ['rev-list', '--count', 'main']));
+  const results = [];
+  for (let i = 0; i < 5; i++) results.push((await app('PUT', '/data/resources/notes', { data: { items: [{ id: `n${i}`, text: 'x' }] } })).status);
+  assert.deepEqual(results, [200, 200, 200, 429, 429], 'burst of 3 writes, then refused');
+  assert.equal(Number(git(repo.bare, ['rev-list', '--count', 'main'])), before + 3, 'refused writes changed nothing');
+  const refused = await fetch(`${base}/api/v1/data/resources/notes`, { method: 'PUT', headers: { authorization: `Bearer ${t}`, 'content-type': 'application/json' }, body: JSON.stringify({ data: { items: [] } }) });
+  assert.equal(refused.status, 429);
+  assert.ok(Number(refused.headers.get('retry-after')) >= 1, 'Retry-After tells the app when to retry');
+  assert.equal((await refused.json()).code, 'RATE_LIMITED');
+  assert.ok(!JSON.stringify(results).includes(t), 'token never echoed');
+  const reads = [];
+  for (let i = 0; i < 6; i++) reads.push((await app('GET', '/data/resources/notes')).status);
+  assert.deepEqual(reads, [200, 200, 200, 200, 200, 429], 'reads have their own bucket');
+  for (let i = 0; i < 10; i++) assert.equal((await fetch(`${base}/api/v1/data/resources/notes`)).status, 200, 'public (tokenless) reads are not limited');
+  assert.equal((await admin('PUT', '/data/resources/notes', { data: { items: [] } })).status, 200, 'admin is not limited');
 });

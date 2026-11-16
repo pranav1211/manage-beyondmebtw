@@ -44,11 +44,16 @@ test('manage-api: v1 routes require an authenticated session (401)', async () =>
   }
 });
 
-test('manage-api: unknown route returns 404', async () => {
+test('manage-api: unknown route returns 404 (API and non-API); the dashboard is served only at /', async () => {
   const { base, close } = await serve(createManageApp(cfg));
   try {
-    const res = await fetch(`${base}/api/unknown`);
-    assert.equal(res.status, 404);
+    assert.equal((await fetch(`${base}/api/unknown`)).status, 404);
+    for (const p of ['/category', '/loginauth', '/operations', '/some/deep/path', '/webhook']) {
+      assert.equal((await fetch(`${base}${p}`)).status, 404, p);
+    }
+    const root = await fetch(`${base}/`);
+    assert.equal(root.status, 200);
+    assert.match(root.headers.get('content-type'), /text\/html/);
   } finally {
     await close();
   }

@@ -207,6 +207,11 @@ export function createApp(config = loadConfig(), overrides = {}) {
       return res.status(statusFor(err)).json(sanitizeError(err));
     }
     if (!gate.ok) return res.status(statusFor({ code: gate.code })).json({ code: gate.code, message: gate.reason });
+    // Production nginx operations are disabled: refuse before any record exists
+    // (the lifecycle keeps its own refusal as a second line of defence).
+    if (ctx.mode === 'production' && String(body.operation).startsWith('nginx.')) {
+      return res.status(403).json({ code: ERROR_CODES.TARGET_NOT_ALLOWED, message: 'Nginx operations are not enabled in production mode' });
+    }
 
     const record = ctx.store.create({ operation: body.operation, application: body.application, params: body.params });
     const job = { operationId: record.operationId, operation: body.operation, application: body.application, params: body.params || {} };

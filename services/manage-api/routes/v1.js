@@ -10,6 +10,7 @@ import { ARGUS_OPERATIONS } from '../../../shared/contracts/manage-argus.js';
 import { validateRegistryEntry } from '../../../shared/schemas/index.js';
 import { verifyPassword, parseCookies, sessionCookie, SESSION_COOKIE } from '../auth.js';
 import { scopeAllows } from '../api-clients.js';
+import { TokenBucketLimiter, DEFAULT_TOKEN_LIMITS } from '../rate-limit.js';
 
 export const GLOBAL_RECONCILE_CONFIRMATION = 'RECONCILE ALL ELIGIBLE APPS';
 export const PUBLIC_ORIGIN_RE = /^https:\/\/([a-z0-9-]+\.)*beyondmebtw\.com$/;
@@ -63,7 +64,9 @@ const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
  * @param {boolean} deps.secureCookies
  * @param {string} deps.env node env label
  */
-export function createV1Router({ sessions, limiter, passwordHash, argus, registry, resources, dataRepo, apiClients, envStore, appApiUrl = 'http://127.0.0.1:7100/api/v1', secureCookies, env }) {
+export function createV1Router({ sessions, limiter, passwordHash, argus, registry, resources, dataRepo, apiClients, envStore, appApiUrl = 'http://127.0.0.1:7100/api/v1', tokenLimits = DEFAULT_TOKEN_LIMITS, secureCookies, env }) {
+  const tokenWriteLimiter = new TokenBucketLimiter(tokenLimits.write);
+  const tokenReadLimiter = new TokenBucketLimiter(tokenLimits.read);
   const router = express.Router();
   // Canonical documents can be larger than control-plane requests.
   router.use('/data', express.json({ limit: '2mb', strict: true }));
@@ -168,11 +171,17 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
     });
     // Who is calling: an application with its Manage-issued token (Bearer,
     // no cookie, no CSRF), the admin (session + CSRF on writes), or anonymous.
-    router.use('/data', (req, _res, next) => {
+    router.use('/data', (req, res, next) => {
       const h = String(req.get('authorization') || '');
       if (h.startsWith('Bearer ')) {
         const client = apiClients ? apiClients.verify(h.slice(7).trim()) : null;
         if (!client) return next(new AppError('UNAUTHENTICATED', 'Invalid or revoked API token'));
+        // Per-token limits, checked before any handler (a 429 never mutates anything).
+        const gate = (MUTATING.has(req.method) ? tokenWriteLimiter : tokenReadLimiter).take(client.id);
+        if (!gate.allowed) {
+          res.set('Retry-After', String(gate.retryAfterSec));
+          return next(new AppError('RATE_LIMITED', 'Rate limit exceeded for this application token', { retryAfterSec: gate.retryAfterSec }));
+        }
         req.principal = { kind: 'client', client };
         return next();
       }

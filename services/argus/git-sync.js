@@ -52,6 +52,30 @@ export async function syncRepository({ remoteUrl, branch, dir, commit }) {
     if (onBranch.code !== 0) throw new AppError('VALIDATION_FAILED', 'Requested commit is not on the configured branch');
   }
 
+  // Never throw away work an app has not pushed yet. Apps such as minis and
+  // minis-private write tracked files in their own checkout and commit/push them
+  // a moment later; `reset --hard` in that window would silently discard them
+  // (and would also drop local commits whose push failed). Fail visibly instead;
+  // a retry after the app has pushed succeeds. (Untracked files are never
+  // touched by reset, so they are not a reason to refuse.)
+  if (!cloned) {
+    // Porcelain lines are "XY path"; never trim the start (a leading space is part of XY).
+    const dirty = (await run('git', ['-C', dir, 'status', '--porcelain', '--untracked-files=no'])).stdout
+      .split('\n')
+      .filter((l) => l.trim());
+    if (dirty.length) {
+      throw new AppError('CONFLICT', 'Deployment checkout has uncommitted changes to tracked files; refusing to reset (they would be lost). Retry after the app has pushed them.', {
+        paths: dirty.map((l) => l.slice(3)).slice(0, 20)
+      });
+    }
+    const ahead = await run('git', ['-C', dir, 'rev-list', '--count', `origin/${branch}..HEAD`]);
+    if (ahead.code === 0 && Number(ahead.stdout.trim()) > 0) {
+      throw new AppError('CONFLICT', 'Deployment checkout has local commits that are not on the remote yet; refusing to reset (they would be discarded). Retry after the app has pushed them.', {
+        unpushedCommits: Number(ahead.stdout.trim())
+      });
+    }
+  }
+
   await git(['-C', dir, 'reset', '--hard', target]);
   const revision = await git(['-C', dir, 'rev-parse', 'HEAD']);
   return { revision, cloned };

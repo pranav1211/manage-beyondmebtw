@@ -92,6 +92,7 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       apiClients,
       envStore,
       appApiUrl: `http://127.0.0.1:${config.manageApiPort}/api/v1`,
+      ...(deps.tokenLimits ? { tokenLimits: deps.tokenLimits } : {}),
       secureCookies: config.manage.secureCookies,
       env: config.nodeEnv
     })
@@ -99,8 +100,9 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
 
   // Operational UI (built locally, committed: apps/manage/dist).
   if (existsSync(DIST)) {
+    // The dashboard routes after "#", so only "/" serves the page; any other unknown
+    // path is a real 404 (no catch-all answering 200 for everything).
     app.use(express.static(DIST, { index: 'index.html', fallthrough: true }));
-    app.get(/^\/(?!api\/|health$).*/, (_req, res) => res.sendFile(join(DIST, 'index.html')));
   }
 
   app.use((_req, res) => {

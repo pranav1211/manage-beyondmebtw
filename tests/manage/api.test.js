@@ -234,6 +234,12 @@ test('production mode: only allowlisted, non-test, enabled apps are executable',
   assert.equal((await refusedTest.json()).code, 'TARGET_NOT_ALLOWED');
   assert.equal((await send('static-s')).status, 403, 'not on the allowlist');
   assert.equal((await send('node-off')).status, 409, 'disabled');
+  const nginx = await fetch(`${p.base}/operations`, {
+    method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ schemaVersion: 1, operation: 'nginx.apply', application: 'node-a' })
+  });
+  assert.equal(nginx.status, 403, 'production nginx ops are refused up front');
+  assert.equal((await nginx.json()).code, 'TARGET_NOT_ALLOWED');
   const before = await (await fetch(`${p.base}/operations`, { headers: { authorization: `Bearer ${TOKEN}` } })).json();
   assert.equal(before.total, 0, 'refused requests create no operation records');
   assert.equal((await send('node-a')).status, 202, 'allowlisted app accepted');

@@ -89,6 +89,7 @@ export function createApp(config = loadConfig(), overrides = {}) {
   // Context is only built when execution is enabled (no state/registry/repo
   // access in the default disabled mode).
   const ctx = executionEnabled ? buildContext(config, overrides) : null;
+  app.locals.argusStore = ctx ? ctx.store : null;
 
   let scheduler = null;
   const appLocks = new Map();
@@ -275,6 +276,11 @@ export function createApp(config = loadConfig(), overrides = {}) {
 
 export function start(config = loadConfig({ service: 'argus' })) {
   const app = createApp(config);
+  // Close operations a previous Argus process left mid-flight (before serving).
+  if (app.locals.argusStore) {
+    const closed = app.locals.argusStore.recoverInterrupted();
+    if (closed.length) console.log(`[argus] marked ${closed.length} interrupted operation(s) as failed: ${closed.join(', ')}`);
+  }
   // Bind to localhost ONLY — enforced here and validated in loadConfig.
   return app.listen(config.argusPort, config.argusBind, () => {
     console.log(

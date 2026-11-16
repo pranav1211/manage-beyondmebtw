@@ -77,6 +77,27 @@ export class OperationStore {
     });
   }
 
+  /**
+   * At Argus start-up nothing can be in flight, so any record still pending or
+   * running belongs to a process that was stopped mid-operation (e.g. an Argus
+   * restart during a deploy). Mark it failed - visibly - instead of leaving a
+   * phantom "running" operation forever. Returns the ids it closed.
+   */
+  recoverInterrupted() {
+    const closed = [];
+    for (const r of this.list()) {
+      if (r.status !== 'pending' && r.status !== 'running') continue;
+      this.fail(
+        r.operationId,
+        r.stage,
+        new AppError('OPERATION_FAILED', 'Interrupted: Argus restarted while this operation was in progress. Check the application and re-run the operation if needed.')
+      );
+      closed.push(r.operationId);
+    }
+    if (closed.length) this.audit({ kind: 'operations-interrupted', operationIds: closed });
+    return closed;
+  }
+
   block(id, code, message, result) {
     return this.update(id, {
       status: 'blocked',

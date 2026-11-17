@@ -12,7 +12,6 @@
 
 import { AppError } from '../../shared/errors.js';
 import { createCatalog } from '../../shared/data/catalog.js';
-import { compareDataset } from '../../shared/data/compare.js';
 import { sha256, readTextOrNull } from '../../shared/data/durable.js';
 import { resolveWithinRoot } from '../../shared/validation/paths.js';
 import { scopeAllows } from './api-clients.js';
@@ -53,9 +52,8 @@ const actor = (p) => (p.kind === 'client' ? `client:${p.client.id}:${p.client.ap
 /**
  * @param {object} p
  * @param {ReturnType<import('../../shared/data/data-repo.js').createDataRepo>} p.dataRepo
- * @param {Record<string,string>} [p.sourceRoots] owner/repo -> local read-only checkout (comparison mode)
  */
-export function createResourceStore({ dataRepo, sourceRoots = {} }) {
+export function createResourceStore({ dataRepo }) {
   const catalog = createCatalog(dataRepo.root);
 
   function readable(key, principal) {
@@ -311,29 +309,6 @@ export function createResourceStore({ dataRepo, sourceRoots = {} }) {
             persistence: persistenceOf(op)
           };
         })
-      );
-    },
-
-    /** Comparison mode: a declared source checkout vs the canonical copy. Read-only, admin. */
-    compare(key) {
-      const e = catalog.get(key);
-      if (!e.source) throw new AppError('OPERATION_NOT_ALLOWED', 'Resource has no declared source', { key: e.key });
-      const dir = sourceRoots[e.source.repository];
-      let sourceText = null;
-      let sourceNote = null;
-      if (!dir) sourceNote = 'source checkout not configured (DATA_SOURCE_ROOTS)';
-      else {
-        try {
-          sourceText = readTextOrNull(resolveWithinRoot(dir, e.source.path));
-          if (sourceText === null) sourceNote = 'source file not found';
-        } catch (err) {
-          sourceNote = err.code || 'source unreadable';
-        }
-      }
-      return compareDataset(
-        e,
-        { text: sourceText, label: { repository: e.source.repository, path: e.source.path, ...(sourceNote ? { note: sourceNote } : {}) } },
-        { text: dataRepo.readText(e.relPath), label: { repository: 'bmb-data', path: e.relPath } }
       );
     }
   });

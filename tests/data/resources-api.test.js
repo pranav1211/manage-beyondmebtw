@@ -20,7 +20,7 @@ const SECRET = 'resources-test-webhook-secret';
 const servers = [];
 after(async () => { for (const s of servers) await s.close(); });
 
-async function boot(repo, { sourceRoots = {} } = {}) {
+async function boot(repo) {
   const dataRepo = openRepo(repo);
   const s = await serve(
     createApp(loadConfig({ env: {} }), {
@@ -28,7 +28,7 @@ async function boot(repo, { sourceRoots = {} } = {}) {
       argus: { health: async () => ({ reachable: true }) },
       dataRepo,
       registry: createRegistryStore({ dataRepo, expectedRemote: repo.bare }),
-      resources: createResourceStore({ dataRepo, sourceRoots }),
+      resources: createResourceStore({ dataRepo }),
       dataRepoFullName: 'pranav1211/bmb-data',
       limiter: new LoginLimiter({ max: 100 })
     })
@@ -250,25 +250,6 @@ test('concurrency: same-resource writes serialize (none lost); registry + data w
   assert.equal(JSON.parse(git(repo.bare, ['show', 'main:data/list/list.json'])).length, 4);
   assert.equal(JSON.parse(git(repo.bare, ['show', 'main:registry/applications.json'])).applications.length, 2);
   assert.equal(git(repo.checkout, ['status', '--porcelain']), '');
-});
-
-// ── Comparison mode ────────────────────────────────────────────────────────
-test('comparison mode: reports counts, ids, order and differences without normalizing', async () => {
-  const repo = makeSeededDataRepo();
-  const legacy = tmp('legacy-');
-  mkdirSync(legacy, { recursive: true });
-  writeFileSync(join(legacy, 'notes.json'), j({ items: [{ id: 'b', text: 'second' }, { id: 'a', text: 'FIRST' }, { id: 'z', text: 'only in source' }] }));
-  const { call } = await boot(repo, { sourceRoots: { 'fixture/legacy': legacy } });
-  const r = await call('GET', '/data/resources/notes/compare');
-  assert.equal(r.status, 200);
-  assert.equal(r.body.identical, false);
-  assert.equal(r.body.source.count, 3);
-  assert.equal(r.body.target.count, 2);
-  assert.deepEqual(r.body.ids.missingInTarget, ['z']);
-  assert.equal(r.body.ids.sameOrder, false);
-  assert.ok(r.body.differences.length > 0);
-  assert.equal(r.body.target.path, 'data/notes/notes.json');
-  assert.equal((await call('GET', '/data/resources/notes/compare', undefined, { auth: false })).status, 401);
 });
 
 // ── bmb-data webhook ───────────────────────────────────────────────────────

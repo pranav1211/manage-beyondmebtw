@@ -121,7 +121,7 @@
         "repository",
         "path"
       ],
-      "description": "Where the dataset currently lives (comparison mode / migration evidence).",
+      "description": "Where the dataset came from before it moved to bmb-data (migration record).",
       "properties": {
         "repository": {
           "type": "string",

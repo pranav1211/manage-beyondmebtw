@@ -62,7 +62,7 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       stateRoot: resolve(config.manage.stateRoot)
     });
   const registry = deps.registry || createRegistryStore({ dataRepo, expectedRemote: config.manage.dataRepoRemote });
-  const resources = deps.resources || createResourceStore({ dataRepo, sourceRoots: config.manage.sourceRoots });
+  const resources = deps.resources || createResourceStore({ dataRepo });
   const apiClients = deps.apiClients || createApiClients({ dataRepo });
   const envStore = deps.envStore || createEnvStore({ envRoot: config.manage.envRoot });
   app.locals.dataRepo = dataRepo;

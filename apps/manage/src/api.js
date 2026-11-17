@@ -66,7 +66,6 @@ export const api = {
   dataResources: () => call('GET', '/data/resources'),
   dataOperations: (limit = 30) => call('GET', `/data/operations?limit=${limit}`),
   dataRetry: (id) => call('POST', `/data/operations/${encodeURIComponent(id)}/retry`, {}),
-  dataCompare: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}/compare`),
   dataResource: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}`),
   dataReplace: (key, data, ifRevision) => call('PUT', `/data/resources/${encodeURIComponent(key)}`, { data, ifRevision }),
   appEnv: (app) => call('GET', `/apps/${encodeURIComponent(app)}/env`),

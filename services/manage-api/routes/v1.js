@@ -489,9 +489,6 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
 
   // ── Canonical data: admin-only views ────────────────────────────────────
   if (resources && dataRepo) {
-    router.get('/data/resources/:key/compare', (req, res) => {
-      res.json(resources.compare(req.params.key));
-    });
     router.get('/data/status', wrap(async (_req, res) => {
       let catalogState;
       try {

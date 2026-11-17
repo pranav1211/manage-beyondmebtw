@@ -363,3 +363,38 @@ pre.json { background: var(--surface-2); padding: 12px; font-family: var(--mono)
   .feats, .slots, .slots.three, .cols-2, .cols-3, .f2, .f3 { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ── Surface: static contour lines behind everything, a frosted-glass rail, rounded corners ── */
+body { background: var(--bg) url('/contours.svg') center / cover no-repeat fixed; }
+.navcard {
+  background: rgba(253, 250, 243, .55);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, .75);
+  border-radius: 22px;
+  color: var(--ink);
+  box-shadow: 0 20px 44px -24px rgba(28, 47, 107, .45), inset 0 1px 0 rgba(255, 255, 255, .9);
+}
+.brand { color: var(--ink); }
+.nav .grp { color: var(--muted); font-weight: 700; }
+.nav a:not(.brand) { color: var(--ink); border-radius: 10px; }
+.nav a:not(.brand):hover { background: rgba(255, 255, 255, .6); }
+.nav a.on { color: var(--ink); background: rgba(255, 255, 255, .8); }
+.nav a.ext { border-radius: 10px; }
+.signout { color: var(--ink); background: rgba(255, 255, 255, .35); border-color: rgba(28, 47, 107, .35); border-radius: 10px; }
+.signout:focus-visible { outline-color: var(--pink); }
+
+/* separate rounded cards (the contours show in the gaps) instead of a hairline grid */
+.grid, .ov { gap: 18px; background: transparent; border: 0; }
+.grid > .card, .ov > .card { border: 1px solid var(--line); }
+.card, .list, .stage, .slot { border-radius: 18px; }
+.list, .modal { overflow: hidden; }
+.card, .list { box-shadow: 0 14px 34px -26px rgba(28, 47, 107, .5); }
+.btn, .tab, .seg, .in, .presets button, .bigstep > div, .bigstep button, .ep, pre.json, .pcard, .imgcell { border-radius: 10px; }
+.seg { overflow: hidden; }
+.chip { border-radius: 999px; background: rgba(253, 250, 243, .85); }
+.chip.on { background: var(--blue); }
+.badge, .pill { border-radius: 6px; }
+.banner { border-radius: 12px; }
+.savebar, .modal, .toast { border-radius: 16px; }
+.thumb, .li .th, .feats i, .mini-bento i, .insp .pv, .imgcell .pv, .frame { border-radius: 10px; }

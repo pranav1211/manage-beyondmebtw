@@ -69,6 +69,14 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
   const apiClients = deps.apiClients || createApiClients({ dataRepo });
   const envStore = deps.envStore || createEnvStore({ envRoot: config.manage.envRoot });
   app.locals.dataRepo = dataRepo;
+  app.locals.resources = resources;
+  // A push to bmb-data arrives already committed: re-derive home.latest afterwards (follow-up commit
+  // only if the derived fields changed; Manage's own follow-up push then syncs as a no-op).
+  const refreshDerived = () =>
+    Promise.resolve()
+      .then(() => resources.refreshDerived && resources.refreshDerived())
+      .then((r) => { if (r && r.status && r.status !== 'noop' && r.status !== 'unavailable') console.log(`[manage-api] home.latest derived fields refreshed: ${r.status}`); })
+      .catch((err) => console.error(`[manage-api] home.latest refresh failed: ${err.code || 'INTERNAL'} ${err.message}`));
 
   // bmb-data webhook: raw body (exact signed bytes), before any JSON parser/session gate.
   app.post(
@@ -78,7 +86,8 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       dataRepo,
       expectedFullName: deps.dataRepoFullName || fullNameOf(config.manage.dataRepoRemote),
       branch: config.manage.dataRepoBranch,
-      env
+      env,
+      onSynced: () => { refreshDerived(); }
     })
   );
 
@@ -131,6 +140,11 @@ export async function start(config = loadConfig({ service: 'manage' })) {
     // Visible in /api/v1/data/status; Manage still serves reads.
     console.error(`[manage-api] data recovery failed: ${err.code || 'INTERNAL'} ${err.message}`);
   }
+  // Backfill / catch-up: make sure home.latest's derived fields match the data (no-op when they do).
+  app.locals.resources.refreshDerived().then(
+    (r) => console.log(`[manage-api] home.latest derived fields: ${r.status}`),
+    (err) => console.error(`[manage-api] home.latest derive at start failed: ${err.code || 'INTERNAL'} ${err.message}`)
+  );
   // Loopback only: nginx is the sole public entry point.
   return app.listen(config.manageApiPort, '127.0.0.1', () => {
     console.log(`[manage-api] listening on 127.0.0.1:${config.manageApiPort} (${config.nodeEnv})`);

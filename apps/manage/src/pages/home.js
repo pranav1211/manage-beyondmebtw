@@ -72,6 +72,13 @@ export async function render(view, _parts, { reroute }) {
           ? `<div class="slot empty-slot"><div>Empty slot</div><div class="sf" style="padding-top:10px"><button class="btn sm" data-a="mini-pick" data-i="${i}">Pick</button></div></div>`
           : `<div class="slot"><div class="sb"><div class="kicker">${esc(mi.date)}</div><b>${esc(mi.title)}</b><span>${esc(String(mi.featuredExcerpt || '').slice(0, 160))}${String(mi.featuredExcerpt || '').length > 160 ? '…' : ''}</span></div><div class="sf"><button class="btn sm" data-a="mini-pick" data-i="${i}">Replace</button><button class="btn sm ghost" data-a="mini-clear" data-i="${i}">Clear</button></div></div>`}</div>`).join('')}</div></section>
 
+      <section class="card tint-blue"><h2><span class="n">05</span>Recent posts<span class="aside">Automatic · the site shows the first 4</span></h2>
+        <p class="small muted" style="margin-bottom:12px">Worked out by Manage whenever a post, a category or this page changes: the newest posts that aren't already the main post or featured.${original.recentGeneratedAt ? ` Last changed ${esc(new Date(original.recentGeneratedAt).toLocaleString())}.` : ''}</p>
+        ${Array.isArray(original.recent) && original.recent.length
+          ? `<div class="list">${original.recent.map((r, i) => `<div class="li" style="cursor:default${i >= 4 ? ';opacity:.55' : ''}"><i class="th" style="background-image:${cssUrl(r.thumbnail)}"></i><div class="tx"><b>${esc(r.title)}</b><span>${esc(prettyDate(r.date))} · ${esc(r.categoryName)}${i >= 4 ? ' · spare' : ''}</span></div></div>`).join('')}</div>`
+          : '<div class="empty">Not worked out yet; it appears after the next change.</div>'}
+      </section>
+
       <div class="savebar ${dirty ? '' : 'hidden'}"><span class="pulse"></span><b>Unsaved homepage changes</b><button class="btn ghost sm" data-a="discard">Discard</button><button class="btn primary sm" data-a="save">Save homepage</button></div>`;
 
     $$('[data-a]', view).forEach((b) => b.addEventListener('click', () => act(b.dataset.a, +b.dataset.i, b)));

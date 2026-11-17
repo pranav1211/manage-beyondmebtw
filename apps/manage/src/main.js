@@ -46,12 +46,12 @@ const ROUTES = {
 
 function drawNav(active) {
   // The rail keeps its place; its content floats in one card, as tall as it needs and no taller.
-  nav.innerHTML = `<div class="navcard"><a class="brand" href="#/"><img class="logo" src="${LOGO}" alt="">Manage</a>${NAV.map((n) =>
+  nav.innerHTML = `<div class="navcard"><a class="brand" href="#/"><img class="logo" src="${LOGO}" alt="">Manage</a>
+    <a class="ext" href="https://content.beyondmebtw.com" target="_blank" rel="noopener">Content server${icon('ext')}</a>${NAV.map((n) =>
     n.group
       ? `<div class="grp">${esc(n.group)}</div>`
       : `<a href="${n.href}" class="${n.id === active ? 'on' : ''}" data-id="${n.id}">${esc(n.label)}</a>`
   ).join('')}
-    <a class="ext" href="https://content.beyondmebtw.com" target="_blank" rel="noopener">Content server${icon('ext')}</a>
     <div class="foot"><button class="signout" id="logout" type="button">${icon('logout')}<span>Sign out</span></button></div></div>`;
   $('#logout').addEventListener('click', async () => {
     if (isDirty() && !(await confirmDialog('Unsaved changes', 'Sign out and lose your unsaved changes?', { confirmLabel: 'Sign out', danger: true }))) return;

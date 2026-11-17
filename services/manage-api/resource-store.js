@@ -12,6 +12,7 @@
 
 import { AppError } from '../../shared/errors.js';
 import { createCatalog, parseCatalog, CATALOG_REL } from '../../shared/data/catalog.js';
+import { deriveHome, affectsHome } from '../../shared/data/home-derive.js';
 import { sha256 } from '../../shared/data/durable.js';
 import { scopeAllows } from './api-clients.js';
 
@@ -127,14 +128,62 @@ export function createResourceStore({ dataRepo }) {
     validateDoc(e, parsed);
   };
 
+  // ── Derived fields of home.latest (see shared/data/home-derive.js) ──
+  // Any write to blog.categories, a blog.posts.<category> or home.latest itself carries the
+  // recomputed home.latest IN THE SAME COMMIT. The fields are server-owned: whatever a client
+  // sends for them is replaced. Unchanged derived output is never written (no loops, no churn).
+  const importedEntry = (key) => {
+    try {
+      const e = catalog.get(key);
+      return e.status === 'imported' && e.format === 'json' ? e : null;
+    } catch {
+      return null;
+    }
+  };
+  const currentDoc = (key) => {
+    const e = importedEntry(key);
+    if (!e) return null;
+    try { return loadDoc(e); } catch { return null; }
+  };
+  /** overrides: Map key -> next document (null = deleted). Returns { entry, doc, current } or null. */
+  function derivedHome(overrides) {
+    const homeE = importedEntry('home.latest');
+    if (!homeE || !importedEntry('blog.categories')) return null;
+    const cur = currentDoc('home.latest');
+    const base = overrides.has('home.latest') ? overrides.get('home.latest') : cur && cur.doc;
+    if (!base || typeof base !== 'object') return null;
+    const cats = overrides.has('blog.categories') ? overrides.get('blog.categories') : (currentDoc('blog.categories') || {}).doc;
+    const posts = {};
+    for (const k of Object.keys(cats || {})) {
+      const key = `blog.posts.${k}`;
+      posts[k] = overrides.has(key) ? overrides.get(key) : (currentDoc(key) || {}).doc || null;
+    }
+    return { entry: homeE, doc: deriveHome(base, cats, posts, { previous: cur && cur.doc }), current: cur };
+  }
+  const homeLockFor = (key) => (affectsHome(key) && key !== 'home.latest' && importedEntry('home.latest') ? ['home.latest'] : []);
+
   async function persist(e, action, nextDoc, { expectRevision, idempotencyKey, message, principal }) {
-    if (nextDoc !== null) validateDoc(e, nextDoc);
+    let doc = nextDoc;
+    const extra = []; // the derived home.latest, when this write changes it
+    if (affectsHome(e.key)) {
+      const d = derivedHome(new Map([[e.key, nextDoc]]));
+      if (d && e.key === 'home.latest') doc = d.doc;
+      else if (d && serialize(d.entry, d.doc) !== dataRepo.readText(d.entry.relPath)) {
+        validateDoc(d.entry, d.doc);
+        extra.push({ entry: d.entry, content: serialize(d.entry, d.doc), expectBefore: d.current ? d.current.revision : null });
+      }
+    }
+    if (doc !== null) validateDoc(e, doc);
+    const byRel = new Map([[e.relPath, e], ...extra.map((x) => [x.entry.relPath, x.entry])]);
     const op = await dataRepo.mutate({
       action,
-      keys: [e.key],
-      changes: [{ relPath: e.relPath, content: nextDoc === null ? null : serialize(e, nextDoc), ...(expectRevision !== undefined ? { expectBefore: expectRevision } : {}) }],
-      message,
-      validate: validatorFor(e),
+      keys: [e.key, ...extra.map((x) => x.entry.key)],
+      changes: [
+        { relPath: e.relPath, content: doc === null ? null : serialize(e, doc), ...(expectRevision !== undefined ? { expectBefore: expectRevision } : {}) },
+        ...extra.map((x) => ({ relPath: x.entry.relPath, content: x.content, expectBefore: x.expectBefore }))
+      ],
+      message: extra.length ? `${message} (+ home.latest recent posts)` : message,
+      validate: (rel, content) => validatorFor(byRel.get(rel))(rel, content),
       idempotencyKey,
       actor: actor(principal)
     });
@@ -154,8 +203,11 @@ export function createResourceStore({ dataRepo }) {
   };
 
   /** Run fn(entry) under the resource lock with a FRESH entry (status may change while waiting). */
-  const withResource = (key, principal, fn) =>
-    dataRepo.resourceLocks.withLocks([writable(key, principal).key], () => fn(writable(key, principal)));
+  const withResource = (key, principal, fn) => {
+    const k = writable(key, principal).key;
+    // A write that also re-derives home.latest holds its lock too.
+    return dataRepo.resourceLocks.withLocks([k, ...homeLockFor(k)], () => fn(writable(key, principal)));
+  };
 
   return Object.freeze({
     catalog,
@@ -273,8 +325,10 @@ export function createResourceStore({ dataRepo }) {
       }
       const keys = changes.map((c) => writable(String(c && c.key), principal).key);
       if (new Set(keys).size !== keys.length) throw new AppError('VALIDATION_FAILED', 'Each resource may appear once per transaction');
+      const derive = keys.some(affectsHome) && importedEntry('home.latest') !== null;
+      const lockKeys = derive && !keys.includes('home.latest') ? [...keys, 'home.latest'] : keys;
       return dataRepo.structuralLock.withLock(() =>
-        dataRepo.resourceLocks.withLocks(keys, async () => {
+        dataRepo.resourceLocks.withLocks(lockKeys, async () => {
           const entries = keys.map((k) => writable(k, principal));
           const prepared = entries.map((e, i) => {
             const c = changes[i];
@@ -292,23 +346,63 @@ export function createResourceStore({ dataRepo }) {
             validateDoc(e, c.data);
             return { relPath: e.relPath, content: serialize(e, c.data), expectBefore: current };
           });
+          // Re-derive home.latest from the post-change state, in this same commit.
+          if (derive) {
+            const d = derivedHome(new Map(entries.map((e, i) => [e.key, changes[i].delete === true ? null : changes[i].data])));
+            if (d) {
+              const content = serialize(d.entry, d.doc);
+              const at = entries.findIndex((e) => e.key === 'home.latest');
+              if (at > -1) { validateDoc(d.entry, d.doc); prepared[at] = { ...prepared[at], content }; }
+              else if (content !== dataRepo.readText(d.entry.relPath)) {
+                validateDoc(d.entry, d.doc);
+                prepared.push({ relPath: d.entry.relPath, content, expectBefore: d.current ? d.current.revision : null });
+                entries.push(d.entry);
+              }
+            }
+          }
+          const allKeys = entries.map((e) => e.key);
           const byRel = new Map(entries.map((e) => [e.relPath, e]));
           const op = await dataRepo.mutate({
             action: 'resource.transaction',
-            keys,
+            keys: allKeys,
             changes: prepared,
-            message: `manage: update ${keys.join(', ')}`,
+            message: `manage: update ${allKeys.join(', ')}`,
             validate: (rel, content) => validatorFor(byRel.get(rel))(rel, content),
             idempotencyKey,
             actor: actor(principal)
           });
           return {
-            keys,
+            keys: allKeys,
             revisions: Object.fromEntries(entries.map((e) => [e.key, sha256(dataRepo.readText(e.relPath) || '')])),
             persistence: persistenceOf(op)
           };
         })
       );
+    },
+
+    /**
+     * Recompute home.latest's derived fields from the current data and commit them only if they changed.
+     * Used after a bmb-data push arrives (already committed upstream, so this is a follow-up commit) and
+     * once at start-up (backfill). A second run with nothing new is a no-op: no commit, nothing pushed.
+     */
+    async refreshDerived() {
+      if (!importedEntry('home.latest')) return { status: 'unavailable' };
+      return dataRepo.resourceLocks.withLocks(['home.latest'], async () => {
+        const d = derivedHome(new Map());
+        if (!d || !d.current) return { status: 'unavailable' };
+        const content = serialize(d.entry, d.doc);
+        if (content === dataRepo.readText(d.entry.relPath)) return { status: 'noop' };
+        validateDoc(d.entry, d.doc);
+        const op = await dataRepo.mutate({
+          action: 'resource.derive',
+          keys: ['home.latest'],
+          changes: [{ relPath: d.entry.relPath, content, expectBefore: d.current.revision }],
+          message: 'manage: refresh home.latest (recent posts, category names)',
+          validate: validatorFor(d.entry),
+          actor: 'manage'
+        });
+        return { status: op.status, persistence: persistenceOf(op) };
+      });
     },
 
     /**

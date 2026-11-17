@@ -33,6 +33,14 @@ Items the developer has consciously parked. Each has enough context to pick up l
 
 Today the Manage dashboard Data page is the only editor for `blog.*`, `projects` and `home.latest`. A future editor application (with its own server) would receive a narrowly scoped Manage token.
 
+## Skip Node restarts when a push changes nothing the process uses
+
+**Status:** deferred by the developer, 17 November 2026.
+
+**Today:** static apps (beyondmebtw, photos, beyond-money) are only synced and health-checked on push; nothing restarts. Every new commit to a Node app with auto-deploy on (manage-beyondmebtw, f1-titles-data) recreates its PM2 process, even when only docs or content changed. minis and minis-private have auto-deploy off because their own content commits would otherwise restart them.
+
+**Proposal:** after fetching, Argus lists `git diff --name-only <deployed>..<new>`. An app may declare `noRestartPaths` globs in its `argus.deploy.json` (e.g. `["content/**", "**/*.md"]`). If every changed path matches, Argus syncs the files and skips the PM2 reconcile (the operation records `restart: skipped` with the path list); otherwise it restarts as today. No declaration = current behaviour, so it cannot reduce safety. A change to `package.json`/`package-lock.json` is flagged, since dependencies are installed by hand. Payoff: minis/minis-private can turn auto-deploy back on, so code pushes deploy themselves while content pushes do not restart them. Needs tests (all-match skip, mixed change restarts, no declaration, first deploy, declaration change itself restarts).
+
 ## Argus production Nginx operations
 
 **Status:** remain disabled. Any future proposal must define allowed operations, validation (`nginx -t`), authorization, recovery and production boundaries.

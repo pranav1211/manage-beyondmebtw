@@ -38,7 +38,10 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+      // Scripts stay same-origin only. Images may come from any https host (the editors preview
+      // content.beyondmebtw.com thumbnails and any URL being pasted in); inline style attributes carry
+      // per-item thumbnails and photo-grid spans; the Inter Tight webfont comes from Google Fonts.
+      'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     });
     next();
   });

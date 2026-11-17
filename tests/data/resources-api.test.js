@@ -3,7 +3,7 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../../shared/config/index.js';
 import { createApp } from '../../services/manage-api/index.js';

@@ -12,8 +12,7 @@
 
 import { AppError } from '../../shared/errors.js';
 import { createCatalog } from '../../shared/data/catalog.js';
-import { sha256, readTextOrNull } from '../../shared/data/durable.js';
-import { resolveWithinRoot } from '../../shared/validation/paths.js';
+import { sha256 } from '../../shared/data/durable.js';
 import { scopeAllows } from './api-clients.js';
 
 const ITEM_ID_RE = /^[A-Za-z0-9_.-]{1,128}$/;

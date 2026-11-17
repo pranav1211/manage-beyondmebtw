@@ -27,7 +27,9 @@ const ICONS = {
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
   image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15.5 9.5h.01',
   refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
-  copy: 'M9 9h11v11H9zM5 15V4h11'
+  copy: 'M9 9h11v11H9zM5 15V4h11',
+  logout: 'M15 4h4v16h-4M10 8l-4 4 4 4M6 12h11',
+  arrow: 'M5 12h14M13 6l6 6-6 6'
 };
 export const icon = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name] || ''}"/></svg>`;
 
@@ -73,26 +75,64 @@ function statusEl() {
   }
   return el;
 }
+// The "working" state is held for at least MIN_WORK_MS so a fast save is seen as
+// "Saving… → ✓ Saved" rather than a flicker, shows elapsed seconds while it runs (a GitHub
+// push takes a few seconds), and says so if something runs unusually long.
+const MIN_WORK_MS = 650;
+let workStartedAt = 0;
+let workTicker = null;
+let showSeq = 0;
+let pendingShow = null;
+function stopTicker() { if (workTicker) { clearInterval(workTicker); workTicker = null; } }
+
 /** Show "label" with a spinner until a result (toast) replaces it. */
 export function working(label) {
   const el = statusEl();
   clearTimeout(statusTimer);
+  clearTimeout(pendingShow);
+  stopTicker();
+  showSeq += 1;
+  workStartedAt = Date.now();
   el.className = 'toast show t-work';
-  el.innerHTML = `<span class="spin"></span><span>${esc(label)}</span>`;
+  el.innerHTML = `<span class="spin"></span><span>${esc(label)}</span><span class="elapsed"></span>`;
+  workTicker = setInterval(() => {
+    const s = Math.floor((Date.now() - workStartedAt) / 1000);
+    const e = el.querySelector('.elapsed');
+    if (!e) return stopTicker();
+    if (s >= 2) e.textContent = `${s}s`;
+    if (s >= 25) e.textContent = `${s}s · taking longer than usual, still working`;
+  }, 500);
 }
 /** The result of an action (or any message). kind: ok | warn | bad */
 export function toast(msg, kind = 'ok') {
   const el = statusEl();
-  clearTimeout(statusTimer);
-  el.className = `toast show t-${kind}`;
-  el.innerHTML = `<span class="ico">${kind === 'ok' ? icon('check') : kind === 'bad' ? icon('x') : '!'}</span><span>${msg}</span>`;
-  statusTimer = setTimeout(() => el.classList.remove('show'), kind === 'bad' ? 7000 : 3600);
+  const seq = ++showSeq;
+  clearTimeout(pendingShow);
+  const wait = el.classList.contains('t-work') ? Math.max(0, MIN_WORK_MS - (Date.now() - workStartedAt)) : 0;
+  pendingShow = setTimeout(() => {
+    if (seq !== showSeq) return; // a newer message took over
+    stopTicker();
+    clearTimeout(statusTimer);
+    el.className = `toast show t-${kind}`;
+    el.innerHTML = `<span class="ico">${kind === 'ok' ? icon('check') : kind === 'bad' ? icon('x') : '!'}</span><span>${msg}</span>`;
+    statusTimer = setTimeout(() => el.classList.remove('show'), kind === 'bad' ? 7000 : 3600);
+  }, wait);
 }
-const stillWorking = () => { const el = $('#toast'); return el && el.classList.contains('t-work'); };
+/** Hide a lingering "working" state that no result replaced (e.g. a dialog took over). */
+function clearWorking() {
+  const seq = showSeq;
+  const wait = Math.max(0, MIN_WORK_MS - (Date.now() - workStartedAt));
+  setTimeout(() => {
+    if (seq !== showSeq || busyDepth) return;
+    const el = $('#toast');
+    if (el && el.classList.contains('t-work')) { stopTicker(); el.classList.remove('show'); }
+  }, wait);
+}
 // Any write the API makes shows activity, even when it isn't wrapped in busy().
 window.addEventListener('manage:write', (e) => {
   if (e.detail === 'start' && !busyDepth) working('Saving…');
-  if (e.detail === 'end') setTimeout(() => { if (!busyDepth && stillWorking()) $('#toast').classList.remove('show'); }, 1500);
+  // If no result message follows the write within a moment, don't leave "Saving…" up.
+  if (e.detail === 'end' && !busyDepth) setTimeout(clearWorking, 800);
 });
 // Thin progress bar while any request is in flight (shown after a short delay, so quick ones don't flash).
 let barTimer;
@@ -239,8 +279,8 @@ export async function busy(btn, label, fn) {
   } finally {
     busyDepth -= 1;
     if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; }
-    // No result message replaced the "working" state (e.g. a silent no-op): clear it.
-    setTimeout(() => { if (!busyDepth && stillWorking()) $('#toast').classList.remove('show'); }, 400);
+    // No result message replaced the "working" state (e.g. a dialog took over): clear it.
+    if (!busyDepth) clearWorking();
   }
 }
 

@@ -76,7 +76,7 @@ async function appDetail(view, name, { reroute }) {
   const exec = st.executable;
   view.innerHTML = `
     <div class="head"><div><div class="kicker"><a href="#/apps">Apps &amp; deploys</a></div><h1 class="mid">${esc(entry.application)}</h1>
-      <p class="sub">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.autoDeploy === false ? badge('pending', 'auto-deploy off') : badge('ok', 'auto-deploy on')} ${entry.environment === 'test' ? badge('test', 'test target') : ''} · ${[entry.domain, ...(entry.aliases || [])].map((h) => `<a href="https://${esc(h)}" target="_blank" rel="noopener">${esc(h)}</a>`).join(' · ')}</p></div>
+      <p class="statusline">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.autoDeploy === false ? badge('pending', 'auto-deploy off') : badge('ok', 'auto-deploy on')} ${entry.environment === 'test' ? badge('test', 'test target') : ''} · ${[entry.domain, ...(entry.aliases || [])].map((h) => `<a href="https://${esc(h)}" target="_blank" rel="noopener">${esc(h)}</a>`).join(' · ')}</p></div>
       <div class="acts"><a class="btn" href="#/registry/${encodeURIComponent(entry.application)}/edit">${icon('edit')}Edit registry entry</a></div></div>
     ${st.unavailable ? `<div class="banner bad">Argus is unavailable (${esc(st.code)}). Runtime state is unknown.</div>` : ''}
     ${st.undeployedPush ? `<div class="banner warn">Pushed but <b>not deployed</b> (auto-deploy is off): <code>${esc(st.undeployedPush.commit.slice(0, 12))}</code> · ${esc(time(st.undeployedPush.at))}. Deploy latest to ship it, or Restart to restart without deploying.</div>` : ''}
@@ -209,7 +209,7 @@ async function opDetail(view, id) {
   const draw = (o) => {
     view.innerHTML = `
       <div class="head"><div><div class="kicker"><a href="#/ops">Operations</a></div><h1 class="mid">${esc(o.operation)} · ${esc(o.application)}</h1>
-        <p class="sub">${opState(o)} ${TERMINAL.has(o.status) ? '' : '<span class="spin"></span>live'} · <code>${esc(o.operationId)}</code></p></div>
+        <p class="statusline">${opState(o)} ${TERMINAL.has(o.status) ? '' : '<span class="spin"></span>live'} · <code>${esc(o.operationId)}</code></p></div>
         <div class="acts"><a class="btn" href="#/apps/${encodeURIComponent(o.application)}">Open app</a></div></div>
       <section class="card"><dl class="kv"><dt>Stage</dt><dd>${esc(o.stage ?? '—')}</dd><dt>Started</dt><dd>${esc(time(o.createdAt))}</dd><dt>Finished</dt><dd>${esc(time(o.finishedAt))}</dd></dl></section>
       ${o.error ? `<section class="section"><h2>Failure</h2><div class="banner bad"><b>${esc(o.error.code)}</b> ${esc(o.error.message)}</div>${o.error.details ? json(o.error.details) : ''}</section>` : ''}

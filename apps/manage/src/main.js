@@ -2,7 +2,7 @@
 // Pages live in ./pages/*; each exports render(view, params) and may return a cleanup function.
 
 import { api, ApiError } from './api.js';
-import { esc, $, errorText, isDirty, setDirtyCheck, confirmDialog } from './ui.js';
+import { esc, $, icon, errorText, isDirty, setDirtyCheck, confirmDialog } from './ui.js';
 import * as overview from './pages/overview.js';
 import * as home from './pages/home.js';
 import * as blog from './pages/blog.js';
@@ -45,11 +45,14 @@ const ROUTES = {
 };
 
 function drawNav(active) {
-  nav.innerHTML = `<a class="brand" href="#/"><img class="logo" src="${LOGO}" alt="">Manage</a>${NAV.map((n) =>
+  // The rail keeps its place; its content floats in one card, as tall as it needs and no taller.
+  nav.innerHTML = `<div class="navcard"><a class="brand" href="#/"><img class="logo" src="${LOGO}" alt="">Manage</a>${NAV.map((n) =>
     n.group
       ? `<div class="grp">${esc(n.group)}</div>`
       : `<a href="${n.href}" class="${n.id === active ? 'on' : ''}" data-id="${n.id}">${esc(n.label)}</a>`
-  ).join('')}<div class="foot"><button class="linkbtn" id="logout" type="button">Sign out</button></div>`;
+  ).join('')}
+    <a class="ext" href="https://content.beyondmebtw.com" target="_blank" rel="noopener">Content server${icon('ext')}</a>
+    <div class="foot"><button class="signout" id="logout" type="button">${icon('logout')}<span>Sign out</span></button></div></div>`;
   $('#logout').addEventListener('click', async () => {
     if (isDirty() && !(await confirmDialog('Unsaved changes', 'Sign out and lose your unsaved changes?', { confirmLabel: 'Sign out', danger: true }))) return;
     await api.logout().catch(() => {});
@@ -77,29 +80,33 @@ function continueAppLogin() {
   return true;
 }
 
+// "I've been expecting you, Mr. Bond", the line everyone remembers that way, struck out for Mr. V.
+// The strike-and-land plays on arrival; retries after a wrong password (and reduced motion) show the final line.
 function showLogin(message) {
   cleanup();
   nav.classList.add('hidden');
+  const animate = !message && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   view.innerHTML = `
-    <section class="login">
-      <img class="login-logo" src="${LOGO}" alt="Beyond Me">
-      <h1>Manage</h1>
-      <p class="sub">Beyond Me control panel</p>
-      ${message ? `<div class="banner bad">${esc(message)}</div>` : ''}
+    <section class="login ${animate ? 'animate' : ''}">
+      <h1 class="bond">I’ve been expecting you, <span class="mr">Mr.&nbsp;<span class="was">Bond</span><span class="is">V.</span></span></h1>
       <form id="login-form" class="login-form">
-        <label class="f"><span>Admin password</span><input class="in" type="password" name="password" autocomplete="current-password" required autofocus></label>
-        <button class="btn primary wide" type="submit">Sign in</button>
+        <input class="pw" type="password" name="password" aria-label="Password" placeholder="Password" autocomplete="current-password" required autofocus>
+        <button class="go" type="submit" aria-label="Sign in">${icon('arrow')}</button>
       </form>
+      <p class="login-msg" role="alert">${message ? esc(message) : ''}</p>
     </section>`;
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const go = $('.go', e.target);
+    go.disabled = true;
+    go.innerHTML = '<span class="spin"></span>';
     try {
       await api.login(String(new FormData(e.target).get('password')));
       if (continueAppLogin()) return;
       if (location.hash.startsWith('#/login')) location.hash = '#/';
       route();
     } catch (err) {
-      showLogin(err.code === 'RATE_LIMITED' ? 'Too many attempts. Wait a bit and retry.' : 'Sign-in failed.');
+      showLogin(err.code === 'RATE_LIMITED' ? 'Too many attempts. Wait a bit and retry.' : 'Not this time.');
     }
   });
 }
@@ -126,6 +133,7 @@ export async function route() {
   cleanup();
   const id = ++navId;
   if (!page) {
+    view.classList.remove('navigating'); // an earlier, superseded navigation may have dimmed the view
     view.innerHTML = '<div class="page"><div class="empty big">Nothing here. <a href="#/">Back to the overview</a></div></div>';
     return;
   }

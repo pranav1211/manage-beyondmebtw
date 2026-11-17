@@ -12,10 +12,14 @@ export class ApiError extends Error {
   }
 }
 
-async function call(method, path, body) {
+const idem = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `k${Date.now()}${Math.random().toString(36).slice(2)}`);
+
+async function call(method, path, body, { idempotent = false } = {}) {
   const headers = { accept: 'application/json' };
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
+  // Data writes carry an idempotency key, so a retried request can never apply twice.
+  if (idempotent) headers['idempotency-key'] = idem();
   const res = await fetch(`/api/v1${path}`, {
     method,
     headers,
@@ -31,6 +35,9 @@ async function call(method, path, body) {
   if (!res.ok) throw new ApiError(res.status, json);
   return json;
 }
+
+const R = (key) => `/data/resources/${encodeURIComponent(key)}`;
+const W = { idempotent: true };
 
 export const api = {
   async session() {
@@ -48,6 +55,8 @@ export const api = {
     csrfToken = null;
   },
   status: () => call('GET', '/status'),
+
+  // ── registry / applications ──
   registry: () => call('GET', '/registry'),
   app: (name) => call('GET', `/registry/${encodeURIComponent(name)}`),
   createApp: (entry) => call('POST', '/registry', entry),
@@ -62,15 +71,22 @@ export const api = {
     call('POST', '/operations', { operation, application, ...(params ? { params } : {}) }),
   reconcileApp: (name) => call('POST', `/reconcile/${encodeURIComponent(name)}`, {}),
   reconcileAll: (confirm) => call('POST', '/reconcile', { confirm }),
-  dataStatus: () => call('GET', '/data/status'),
-  dataResources: () => call('GET', '/data/resources'),
-  dataOperations: (limit = 30) => call('GET', `/data/operations?limit=${limit}`),
-  dataRetry: (id) => call('POST', `/data/operations/${encodeURIComponent(id)}/retry`, {}),
-  dataResource: (key) => call('GET', `/data/resources/${encodeURIComponent(key)}`),
-  dataReplace: (key, data, ifRevision) => call('PUT', `/data/resources/${encodeURIComponent(key)}`, { data, ifRevision }),
   appEnv: (app) => call('GET', `/apps/${encodeURIComponent(app)}/env`),
   setAppEnv: (app, body) => call('PUT', `/apps/${encodeURIComponent(app)}/env`, body),
   appToken: (app) => call('GET', `/apps/${encodeURIComponent(app)}/token`),
   issueAppToken: (app, body) => call('POST', `/apps/${encodeURIComponent(app)}/token`, body),
-  revokeAppToken: (app) => call('DELETE', `/apps/${encodeURIComponent(app)}/token?restart=true`)
+  revokeAppToken: (app) => call('DELETE', `/apps/${encodeURIComponent(app)}/token?restart=true`),
+
+  // ── canonical data (bmb-data) ──
+  dataStatus: () => call('GET', '/data/status'),
+  dataResources: () => call('GET', '/data/resources'),
+  dataOperations: (limit = 30) => call('GET', `/data/operations?limit=${limit}`),
+  dataRetry: (id) => call('POST', `/data/operations/${encodeURIComponent(id)}/retry`, {}),
+  read: (key) => call('GET', R(key)),
+  replace: (key, data, ifRevision) => call('PUT', R(key), { data, ifRevision }, W),
+  createItem: (key, item, ifRevision) => call('POST', `${R(key)}/items`, { item, ifRevision }, W),
+  updateItem: (key, id, item, ifRevision) => call('PUT', `${R(key)}/items/${encodeURIComponent(id)}`, { item, ifRevision }, W),
+  deleteItem: (key, id, ifRevision) => call('DELETE', `${R(key)}/items/${encodeURIComponent(id)}`, { ifRevision }, W),
+  // changes: [{ key, data, ifRevision } | { key, delete: true, ifRevision }] — one commit, all or nothing.
+  transaction: (changes) => call('POST', '/data/transactions', { changes }, W)
 };

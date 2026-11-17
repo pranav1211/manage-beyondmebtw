@@ -35,7 +35,11 @@ export default [
         location: 'readonly',
         // Browser (apps/manage)
         document: 'readonly',
-        window: 'readonly'
+        window: 'readonly',
+        history: 'readonly',
+        Image: 'readonly',
+        requestAnimationFrame: 'readonly',
+        crypto: 'readonly'
       }
     },
     rules: {

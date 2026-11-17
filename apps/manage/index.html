@@ -5,22 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <title>Manage — Beyond Me</title>
+    <link rel="icon" href="https://content.beyondmebtw.com/assets/bmb_logos/bmblogowb.ico" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <header class="topbar hidden" id="topbar">
-      <a class="brand" href="#/">Manage</a>
-      <nav class="nav" id="nav">
-        <a href="#/" data-route="overview">Overview</a>
-        <a href="#/apps" data-route="apps">Applications</a>
-        <a href="#/ops" data-route="ops">Operations</a>
-        <a href="#/reconcile" data-route="reconcile">Reconcile</a>
-        <a href="#/registry" data-route="registry">Registry</a>
-        <a href="#/data" data-route="data">Data</a>
-      </nav>
-      <button class="btn ghost" id="logout" type="button">Log out</button>
-    </header>
-    <main id="view" class="view" aria-live="polite"></main>
+    <div class="app" id="app">
+      <aside class="nav hidden" id="nav" aria-label="Sections"></aside>
+      <main class="main" id="view" aria-live="polite"></main>
+    </div>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

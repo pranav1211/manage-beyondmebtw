@@ -96,6 +96,7 @@ export function createApp(config = loadConfig({ service: 'manage' }), deps = {})
       envStore,
       appApiUrl: `http://127.0.0.1:${config.manageApiPort}/api/v1`,
       ...(deps.tokenLimits ? { tokenLimits: deps.tokenLimits } : {}),
+      ...(deps.publicLimits ? { publicLimits: deps.publicLimits } : {}),
       secureCookies: config.manage.secureCookies,
       env: config.nodeEnv
     })

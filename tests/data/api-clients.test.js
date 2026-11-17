@@ -30,7 +30,7 @@ CATALOG.resources.push({
   collection: { idPattern: '^p_[a-z0-9]+$' }, operations: ['read', 'replace', 'create', 'delete']
 });
 
-async function boot({ tokenLimits } = {}) {
+async function boot({ tokenLimits, publicLimits } = {}) {
   const files = seedFiles(CATALOG);
   files['data/seasons/2025.json'] = j({ items: [{ id: 'r1', text: 'race one' }] });
   files['registry/applications.json'] = j({ applications: [registryEntry('site-app'), registryEntry('other-app'), registryEntry('manage-beyondmebtw')] });
@@ -50,7 +50,8 @@ async function boot({ tokenLimits } = {}) {
       apiClients: createApiClients({ dataRepo }),
       envStore: createEnvStore({ envRoot }),
       limiter: new LoginLimiter({ max: 100 }),
-      ...(tokenLimits ? { tokenLimits } : {})
+      ...(tokenLimits ? { tokenLimits } : {}),
+      ...(publicLimits ? { publicLimits } : {})
     })
   );
   servers.push(s);
@@ -224,6 +225,39 @@ test('rate limits: per app token; 429 + Retry-After before any write; public rea
   const reads = [];
   for (let i = 0; i < 6; i++) reads.push((await app('GET', '/data/resources/notes')).status);
   assert.deepEqual(reads, [200, 200, 200, 200, 200, 429], 'reads have their own bucket');
-  for (let i = 0; i < 10; i++) assert.equal((await fetch(`${base}/api/v1/data/resources/notes`)).status, 200, 'public (tokenless) reads are not limited');
+  for (let i = 0; i < 10; i++) assert.equal((await fetch(`${base}/api/v1/data/resources/notes`)).status, 200, 'public reads have their own, separate (per-IP) bucket');
   assert.equal((await admin('PUT', '/data/resources/notes', { data: { items: [] } })).status, 200, 'admin is not limited');
+});
+
+test('rate limits: anonymous reads per visitor IP (spoofed X-Forwarded-For does not help); bad tokens count; admin and app tokens unaffected', async () => {
+  const { admin, as, base } = await boot({ publicLimits: { perMinute: 1, burst: 4 } });
+  const t = (await admin('POST', '/apps/site-app/token', { scopes: [{ resource: 'notes', access: ['read', 'write'] }] })).body.token;
+  // What nginx sends: whatever the visitor forged, then ", <their real address>" appended last.
+  // Only that last hop is believed, so forging a different address each time never earns a new bucket.
+  const viaNginx = (forged, extra = {}) => fetch(`${base}/api/v1/data/resources/notes`, { headers: { 'x-forwarded-for': `${forged}, 198.51.100.1`, ...extra } });
+  const statuses = [];
+  for (let i = 0; i < 3; i++) statuses.push((await viaNginx(`203.0.113.${i}`)).status);
+  statuses.push((await viaNginx('10.0.0.1', { authorization: 'Bearer bmbm_c_000000000000_' + 'A'.repeat(43) })).status); // bad token: counted, then 401
+  const limited = await viaNginx('192.0.2.200');
+  statuses.push(limited.status);
+  assert.deepEqual(statuses, [200, 200, 200, 401, 429], 'burst of 4 per real IP (forged addresses ignored), then refused');
+  assert.equal((await fetch(`${base}/api/v1/data/resources/notes`, { headers: { 'x-forwarded-for': '198.51.100.2' } })).status, 200, 'a different real visitor has their own bucket');
+  assert.ok(Number(limited.headers.get('retry-after')) >= 1);
+  assert.equal((await limited.json()).code, 'RATE_LIMITED');
+  assert.equal((await as(t)('GET', '/data/resources/notes')).status, 200, 'app tokens use their own buckets');
+  assert.equal((await admin('GET', '/data/resources/notes')).status, 200, 'the admin session is not limited');
+});
+
+test('rate limiter memory stays bounded: idle buckets are forgotten, floods evict the oldest', async () => {
+  const { TokenBucketLimiter } = await import('../../services/manage-api/rate-limit.js');
+  let now = 0;
+  const l = new TokenBucketLimiter({ perMinute: 60, burst: 2, now: () => now, maxKeys: 100 });
+  for (let i = 0; i < 1000; i++) l.take(`ip${i}`);
+  assert.ok(l.size <= 100, `size ${l.size}`);
+  now += 10_000; // everyone refilled
+  l.take('new');
+  assert.ok(l.size <= 2, `idle buckets pruned (size ${l.size})`);
+  assert.equal(l.take('x').allowed, true);
+  assert.equal(l.take('x').allowed, true);
+  assert.equal(l.take('x').allowed, false, 'limits still apply after pruning');
 });

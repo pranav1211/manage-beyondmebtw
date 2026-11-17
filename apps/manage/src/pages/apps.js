@@ -267,11 +267,21 @@ function readForm(form, existing) {
     const raw = String(fd.get(k) ?? '').trim();
     if (k === 'pm2Config' || k === 'nginxConfig') { out[k] = raw === '' ? null : raw; continue; }
     if (k === 'webhookSecretRef') { if (raw) out[k] = raw; continue; }
-    if (k === 'aliases') { const list = [...new Set(raw.split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean))]; if (list.length) out[k] = list; continue; }
+    if (k === 'aliases') {
+      // Only beyondmebtw's form has this field; other apps keep whatever they already have.
+      if (!fd.has('aliases')) { if (existing && existing.aliases) out.aliases = existing.aliases; continue; }
+      const list = [...new Set(raw.split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean))];
+      if (list.length) out[k] = list;
+      continue;
+    }
+    if (k === 'deploymentPath') { out[k] = `${PROJECTS_ROOT}${String(fd.get('deploymentFolder') || '').trim()}`; continue; }
     out[k] = raw;
   }
   return out;
 }
+const PROJECTS_ROOT = '/projects/';
+const FOLDER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const ALIAS_APPS = new Set(['beyondmebtw']); // only the main site answers on extra hostnames (its section subdomains)
 
 async function registry(view, editName) {
   const reg = await api.registry();
@@ -285,19 +295,28 @@ async function registry(view, editName) {
         <label class="f"><span>Type</span><select class="in" name="type"><option value="static" ${e && e.type === 'static' ? 'selected' : ''}>static</option><option value="node" ${e && e.type === 'node' ? 'selected' : ''}>node</option></select></label></div>
       <div class="f2"><label class="f"><span>Repository (SSH)</span><input class="in mono" name="repository" value="${v('repository')}" placeholder="git@github.com:owner/repo.git" required></label>
         <label class="f"><span>Branch</span><input class="in" name="branch" value="${esc((e && e.branch) || 'main')}" required></label></div>
-      <div class="f2"><label class="f"><span>Deployment path</span><input class="in mono" name="deploymentPath" value="${v('deploymentPath')}" placeholder="/projects/&lt;application&gt;" required></label>
+      <div class="f2"><label class="f"><span>Deployment folder <em>always under /projects/</em></span><div class="prefixed"><span class="mono">/projects/</span><input class="in mono" name="deploymentFolder" value="${esc(e && e.deploymentPath && e.deploymentPath.startsWith(PROJECTS_ROOT) ? e.deploymentPath.slice(PROJECTS_ROOT.length) : (e && e.application) || '')}" placeholder="folder-name" required></div></label>
         <label class="f"><span>Domain</span><input class="in" name="domain" value="${v('domain')}" required></label></div>
       <div class="f2"><label class="f"><span>PM2 config file (node only)</span><input class="in mono" name="pm2Config" value="${v('pm2Config')}" placeholder="&lt;application&gt;.config.js"></label>
         <label class="f"><span>Nginx config file (optional)</span><input class="in mono" name="nginxConfig" value="${v('nginxConfig')}"></label></div>
       <div class="f2"><label class="f"><span>Environment</span><select class="in" name="environment"><option value="production" ${!e || e.environment !== 'test' ? 'selected' : ''}>production</option><option value="test" ${e && e.environment === 'test' ? 'selected' : ''}>test (never executed in production)</option></select></label>
         <label class="f"><span>Webhook secret env var (optional)</span><input class="in mono" name="webhookSecretRef" value="${v('webhookSecretRef')}" placeholder="default secret if empty"></label></div>
-      <label class="f"><span>Other hostnames <em>comma separated; shown here, routed by nginx</em></span><input class="in mono" name="aliases" value="${esc(((e && e.aliases) || []).join(', '))}" placeholder="blog.beyondmebtw.com, www.example.com"></label>
+      ${e && ALIAS_APPS.has(e.application) ? `<label class="f"><span>Other hostnames <em>comma separated; shown here, routed by nginx</em></span><input class="in mono" name="aliases" value="${esc((e.aliases || []).join(', '))}" placeholder="blog.beyondmebtw.com"></label>` : ''}
       <label class="check"><input type="checkbox" class="toggle" name="isPrimaryDomain" ${e && e.isPrimaryDomain ? 'checked' : ''}>Primary domain</label>
       <label class="check"><input type="checkbox" class="toggle" name="enabled" ${!e || e.enabled ? 'checked' : ''}>Enabled</label>
       <div class="formbar"><button class="btn primary" type="submit">${e ? 'Save entry' : 'Register application'}</button><button class="btn ghost" type="button" data-retry>Retry push</button></div>
     </form></section>`;
+  if (!e) {
+    // New app: the folder follows the application name until it's edited by hand.
+    const appIn = $('[name="application"]', view), folderIn = $('[name="deploymentFolder"]', view);
+    let touched = false;
+    folderIn.addEventListener('input', () => { touched = true; });
+    appIn.addEventListener('input', () => { if (!touched) folderIn.value = appIn.value.trim(); });
+  }
   $('[data-f]', view).addEventListener('submit', async (ev) => {
     ev.preventDefault();
+    const folder = String(new FormData(ev.target).get('deploymentFolder') || '').trim();
+    if (!FOLDER_RE.test(folder)) { toast('The deployment folder is one name: letters, digits, ".", "_" or "-"', 'bad'); return; }
     const body = readForm(ev.target, e);
     await busy($('button[type=submit]', ev.target), 'Saving', async () => {
       try {

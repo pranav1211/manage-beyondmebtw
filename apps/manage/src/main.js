@@ -133,8 +133,12 @@ export async function route() {
   // meanwhile instead of flashing to a blank "Loading…". Only the very first render shows a loader.
   const next = document.createElement('div');
   next.className = 'page';
-  if (!view.querySelector(':scope > .page')) view.innerHTML = '<div class="loading"><span class="spin"></span>Loading…</div>';
-  else view.classList.add('navigating');
+  const outgoing = view.querySelector(':scope > .page');
+  if (!outgoing) view.innerHTML = '<div class="loading"><span class="spin"></span>Loading…</div>';
+  else {
+    view.classList.add('navigating');
+    outgoing.inert = true; // still visible while the next page loads, but nothing on it can act on stale data
+  }
   let cleanupFn = null;
   try {
     cleanupFn = await page.render(next, parts, { reroute: route });

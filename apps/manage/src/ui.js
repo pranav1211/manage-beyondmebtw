@@ -26,7 +26,8 @@ const ICONS = {
   check: 'M5 12l5 5L20 7',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
   image: 'M3 5h18v14H3zM3 16l5-5 4 4 3-3 6 6M15.5 9.5h.01',
-  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7'
+  refresh: 'M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7',
+  copy: 'M9 9h11v11H9zM5 15V4h11'
 };
 export const icon = (name, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name] || ''}"/></svg>`;
 
@@ -58,21 +59,50 @@ export const prettyDate = (s) => {
   return iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : String(s || '');
 };
 
-// ── toasts ──
-let toastTimer;
-export function toast(msg, kind = 'ok') {
-  let t = $('#toast');
-  if (!t) {
-    t = document.createElement('div');
-    t.id = 'toast';
-    t.setAttribute('role', 'status');
-    document.body.appendChild(t);
+// ── activity status (top centre): "working…" while something runs, then the result ──
+let statusTimer;
+let busyDepth = 0;
+function statusEl() {
+  let el = $('#toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
   }
-  t.className = `toast show t-${kind}`;
-  t.innerHTML = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), kind === 'bad' ? 6000 : 3200);
+  return el;
 }
+/** Show "label" with a spinner until a result (toast) replaces it. */
+export function working(label) {
+  const el = statusEl();
+  clearTimeout(statusTimer);
+  el.className = 'toast show t-work';
+  el.innerHTML = `<span class="spin"></span><span>${esc(label)}</span>`;
+}
+/** The result of an action (or any message). kind: ok | warn | bad */
+export function toast(msg, kind = 'ok') {
+  const el = statusEl();
+  clearTimeout(statusTimer);
+  el.className = `toast show t-${kind}`;
+  el.innerHTML = `<span class="ico">${kind === 'ok' ? icon('check') : kind === 'bad' ? icon('x') : '!'}</span><span>${msg}</span>`;
+  statusTimer = setTimeout(() => el.classList.remove('show'), kind === 'bad' ? 7000 : 3600);
+}
+const stillWorking = () => { const el = $('#toast'); return el && el.classList.contains('t-work'); };
+// Any write the API makes shows activity, even when it isn't wrapped in busy().
+window.addEventListener('manage:write', (e) => {
+  if (e.detail === 'start' && !busyDepth) working('Saving…');
+  if (e.detail === 'end') setTimeout(() => { if (!busyDepth && stillWorking()) $('#toast').classList.remove('show'); }, 1500);
+});
+// Thin progress bar while any request is in flight (shown after a short delay, so quick ones don't flash).
+let barTimer;
+window.addEventListener('manage:net', (e) => {
+  let bar = $('#progress');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'progress'; document.body.appendChild(bar); }
+  clearTimeout(barTimer);
+  if (e.detail > 0) barTimer = setTimeout(() => bar.classList.add('on'), 120);
+  else bar.classList.remove('on');
+});
 
 // ── dialogs ──
 /**
@@ -202,10 +232,15 @@ export async function saveFailed(err, reload) {
 export async function busy(btn, label, fn) {
   const old = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>${esc(label)}`; }
+  busyDepth += 1;
+  working(`${label}…`);
   try {
     return await fn();
   } finally {
+    busyDepth -= 1;
     if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = old; }
+    // No result message replaced the "working" state (e.g. a silent no-op): clear it.
+    setTimeout(() => { if (!busyDepth && stillWorking()) $('#toast').classList.remove('show'); }, 400);
   }
 }
 

@@ -124,19 +124,34 @@ export async function route() {
   nav.classList.remove('hidden');
   drawNav(navIdFor(first));
   cleanup();
+  const id = ++navId;
   if (!page) {
-    view.innerHTML = '<div class="empty big">Nothing here. <a href="#/">Back to the overview</a></div>';
+    view.innerHTML = '<div class="page"><div class="empty big">Nothing here. <a href="#/">Back to the overview</a></div></div>';
     return;
   }
-  view.innerHTML = '<div class="loading"><span class="spin"></span>Loading…</div>';
-  window.scrollTo(0, 0);
+  // Render the next page off-screen and swap it in when ready: the current page stays (dimmed)
+  // meanwhile instead of flashing to a blank "Loading…". Only the very first render shows a loader.
+  const next = document.createElement('div');
+  next.className = 'page';
+  if (!view.querySelector(':scope > .page')) view.innerHTML = '<div class="loading"><span class="spin"></span>Loading…</div>';
+  else view.classList.add('navigating');
+  let cleanupFn = null;
   try {
-    current = await page.render(view, parts, { reroute: route });
+    cleanupFn = await page.render(next, parts, { reroute: route });
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) return showLogin();
-    view.innerHTML = `<div class="banner bad">${errorText(err)}</div>`;
+    next.innerHTML = `<div class="banner bad">${errorText(err)}</div>`;
   }
+  if (id !== navId) { if (typeof cleanupFn === 'function') cleanupFn(); return; } // a newer navigation won
+  current = cleanupFn;
+  view.classList.remove('navigating');
+  const samePage = view.dataset.route === first;
+  view.replaceChildren(next);
+  view.dataset.route = first;
+  if (!samePage) window.scrollTo(0, 0);
+  window.dispatchEvent(new Event('resize')); // pages that measure themselves (photos canvas) re-fit once attached
 }
+let navId = 0;
 
 window.addEventListener('hashchange', async () => {
   if (skipGuard) { skipGuard = false; lastHash = location.hash; return; }

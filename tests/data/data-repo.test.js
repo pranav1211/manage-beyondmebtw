@@ -75,7 +75,8 @@ test('multi-file mutation (incl. delete) is one commit; invalid content leaves f
 test('paths outside the owned prefixes, traversal and absolute paths are refused', async () => {
   const repo = makeSeededDataRepo();
   const dr = openRepo(repo);
-  for (const rel of ['catalog/catalog.json', '../escape.json', 'data/../catalog/catalog.json', '/etc/passwd', 'data/%2e%2e/x.json']) {
+  // catalog/catalog.json itself is owned (the admin "add dataset" workflow); the rest of catalog/ is not.
+  for (const rel of ['catalog/schemas/notes.schema.json', 'catalog/catalog.json.bak', 'README.md', '../escape.json', 'data/../catalog/catalog.json', '/etc/passwd', 'data/%2e%2e/x.json']) {
     assert.ok(await codeOf(dr.mutate({ action: 'x', keys: ['k'], changes: [{ relPath: rel, content: '{}' }], message: 'm' })), rel);
   }
 });

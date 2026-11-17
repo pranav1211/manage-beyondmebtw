@@ -489,6 +489,19 @@ export function createV1Router({ sessions, limiter, passwordHash, argus, registr
 
   // ── Canonical data: admin-only views ────────────────────────────────────
   if (resources && dataRepo) {
+    // Add a dataset (catalog entry + a document's first content) in one commit. Admin session only.
+    router.post('/data/catalog', wrap(async (req, res) => {
+      const out = await resources.createDataset(req.body, {
+        principal: req.principal,
+        idempotencyKey: req.get('idempotency-key') ? String(req.get('idempotency-key')).slice(0, 128) : undefined
+      });
+      const st = out.persistence.status;
+      if (st === 'blocked' || st === 'failed') {
+        const e = out.persistence.error || {};
+        throw new AppError(e.code || 'OPERATION_FAILED', e.message || 'Could not add the dataset', { operationId: out.persistence.operationId, status: st });
+      }
+      res.status(st === 'pending-push' ? 202 : 201).json(out);
+    }));
     router.get('/data/status', wrap(async (_req, res) => {
       let catalogState;
       try {

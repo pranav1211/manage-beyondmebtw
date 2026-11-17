@@ -1,6 +1,7 @@
 import { api } from '../api.js';
 import { esc, cssUrl, ago, prettyDate, icon } from '../ui.js';
 import { loadBlog, loadHome, loadProjects, loadPhotos, loadMinis } from './content.js';
+import { byPriority } from './apps.js';
 
 const dotFor = (s) => (s === 'succeeded' ? '' : s === 'failed' || s === 'blocked' ? 'bad' : s === 'running' || s === 'pending' ? 'warn' : 'unknown');
 
@@ -26,7 +27,7 @@ export async function render(view) {
 
   const latest = new Map();
   if (ops.ok) for (const o of ops.v.operations) if (!latest.has(o.application)) latest.set(o.application, o);
-  const apps = reg.ok ? reg.v.applications : [];
+  const apps = reg.ok ? byPriority(reg.v.applications) : [];
   const failing = apps.filter((a) => { const o = latest.get(a.application); return o && (o.status === 'failed' || o.status === 'blocked'); });
 
   const activity = [

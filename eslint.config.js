@@ -39,7 +39,10 @@ export default [
         history: 'readonly',
         Image: 'readonly',
         requestAnimationFrame: 'readonly',
-        crypto: 'readonly'
+        crypto: 'readonly',
+        navigator: 'readonly',
+        CustomEvent: 'readonly',
+        Event: 'readonly'
       }
     },
     rules: {

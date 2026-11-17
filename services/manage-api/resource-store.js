@@ -11,7 +11,7 @@
 // Collections ("f1.season" -> f1ta/{id}.json) let apps create/delete members.
 
 import { AppError } from '../../shared/errors.js';
-import { createCatalog } from '../../shared/data/catalog.js';
+import { createCatalog, parseCatalog, CATALOG_REL } from '../../shared/data/catalog.js';
 import { sha256 } from '../../shared/data/durable.js';
 import { scopeAllows } from './api-clients.js';
 
@@ -309,6 +309,108 @@ export function createResourceStore({ dataRepo }) {
           };
         })
       );
+    },
+
+    /**
+     * Admin only: add a dataset to the catalog. A "document" is one JSON file (data/<a>/<b>.json for key "a.b");
+     * a "collection" is a family of JSON files, one per member (data/<a>/<b>/{id}.json), like f1.season.
+     * The new catalog is validated by the same parser that loads it, and the catalog entry plus a document's
+     * first content are committed together. Existing files are never adopted or overwritten.
+     */
+    async createDataset(spec, { idempotencyKey, principal = ADMIN } = {}) {
+      if (principal.kind !== 'admin') throw new AppError('FORBIDDEN', 'Only the admin can add datasets');
+      const s = spec && typeof spec === 'object' && !Array.isArray(spec) ? spec : {};
+      const unknown = Object.keys(s).filter((k) => !['key', 'title', 'owner', 'kind', 'access', 'idPattern', 'items', 'initial', 'notes'].includes(k));
+      if (unknown.length) throw new AppError('UNKNOWN_KEY', 'Unknown key(s) in dataset', { unknown });
+      const key = String(s.key || '');
+      if (!/^[a-z0-9]+(\.[a-z0-9-]+){0,4}$/.test(key) || key.length > 80) {
+        throw new AppError('VALIDATION_FAILED', 'Key must be lower-case words separated by dots, e.g. "f1.drivers"');
+      }
+      if (s.kind !== 'document' && s.kind !== 'collection') throw new AppError('VALIDATION_FAILED', 'kind must be "document" or "collection"');
+      if (s.access !== 'public' && s.access !== 'private') throw new AppError('VALIDATION_FAILED', 'access must be "public" or "private"');
+      const kind = s.kind;
+      let items = null;
+      if (s.items !== undefined && s.items !== null) {
+        const p = String(s.items.pointer ?? ''), f = String(s.items.idField ?? '');
+        if (!/^(|\/[A-Za-z0-9_]{1,40})$/.test(p) || !/^[A-Za-z0-9_]{1,40}$/.test(f)) throw new AppError('VALIDATION_FAILED', 'items needs a pointer ("" or "/field") and an idField');
+        items = { pointer: p, idField: f };
+      }
+      const idPattern = kind === 'collection' ? String(s.idPattern || '^[a-z0-9][a-z0-9_-]{0,63}$') : null;
+
+      return dataRepo.structuralLock.withLock(async () => {
+        // Any existing key, or a member key an existing collection would claim, is taken.
+        try {
+          catalog.get(key);
+          throw new AppError('CONFLICT', 'That key is already in use (or belongs to an existing collection)', { key });
+        } catch (err) {
+          if (err.code !== 'RESOURCE_NOT_FOUND') throw err;
+        }
+        const parts = key.split('.');
+        const path = kind === 'document' ? `${parts.join('/')}.json` : `${parts.join('/')}/{id}.json`;
+        const rel = `data/${path}`;
+        const dirOf = (r) => r.slice(0, r.lastIndexOf('/'));
+        const memberOf = (pattern, idRe, file) => {
+          const [pre, post] = pattern.split('{id}');
+          return file.startsWith(pre) && file.endsWith(post) && file.length > pre.length + post.length && idRe.test(file.slice(pre.length, file.length - post.length));
+        };
+        const base = (r) => r.slice(r.lastIndexOf('/') + 1);
+        const newIdRe = idPattern ? new RegExp(idPattern) : null;
+        for (const e of catalog.load().entries.values()) {
+          if (kind === 'collection' && (e.key.startsWith(`${key}.`) || (e.collection && dirOf(e.relPath) === dirOf(rel)))) {
+            throw new AppError('CONFLICT', `"${e.key}" already lives under that name or folder`, { key: e.key });
+          }
+          if (e.collection && dirOf(e.relPath) === dirOf(rel) && memberOf(base(e.relPath), e.idRe, base(rel))) {
+            throw new AppError('CONFLICT', `The file would look like a member of "${e.key}"`, { key: e.key });
+          }
+          if (kind === 'collection' && !e.collection && dirOf(e.relPath) === dirOf(rel) && memberOf(base(rel), newIdRe, base(e.relPath))) {
+            throw new AppError('CONFLICT', `"${e.key}" would look like a member of the new collection`, { key: e.key });
+          }
+        }
+        if (kind === 'document' && dataRepo.readText(rel) !== null) throw new AppError('CONFLICT', 'A file already exists at that path; it is never adopted silently', { path: rel });
+
+        let initialText = null;
+        if (kind === 'document') {
+          const init = s.initial !== undefined ? s.initial : items ? (items.pointer === '' ? [] : { [items.pointer.slice(1)]: [] }) : {};
+          if (!init || typeof init !== 'object') throw new AppError('VALIDATION_FAILED', 'Initial content must be a JSON object or array');
+          if (items && !Array.isArray(items.pointer === '' ? init : init[items.pointer.slice(1)])) throw new AppError('VALIDATION_FAILED', 'Initial content must hold an array where the items live');
+          initialText = JSON.stringify(init, null, 2) + '\n';
+        }
+
+        const entry = {
+          key,
+          title: String(s.title || key).slice(0, 200),
+          owner: String(s.owner || 'manage').slice(0, 80),
+          root: 'data',
+          path,
+          format: 'json',
+          access: s.access,
+          status: 'imported',
+          ...(kind === 'collection' ? { collection: { idPattern } } : {}),
+          operations: ['read', 'replace', ...(kind === 'collection' ? ['create', 'delete'] : []), ...(items ? ['create-item', 'update-item', 'delete-item'] : [])],
+          ...(items ? { items } : {}),
+          consumers: [],
+          notes: String(s.notes || `Added from the Manage dashboard on ${new Date().toISOString().slice(0, 10)}.`).slice(0, 1000)
+        };
+        const curText = dataRepo.readText(CATALOG_REL);
+        if (curText === null) throw new AppError('DATA_INTEGRITY', 'catalog.json is missing');
+        const doc = JSON.parse(curText);
+        doc.resources.push(entry);
+        const nextText = JSON.stringify(doc, null, 2) + '\n';
+        parseCatalog(dataRepo.root, nextText); // the exact validation the loader applies; throws CATALOG_INVALID
+
+        const changes = [{ relPath: CATALOG_REL, content: nextText, expectBefore: sha256(curText) }];
+        if (initialText !== null) changes.push({ relPath: rel, content: initialText, expectBefore: null });
+        const op = await dataRepo.mutate({
+          action: 'catalog.create',
+          keys: [key],
+          changes,
+          message: `manage: add dataset ${key}`,
+          validate: (r, content) => { if (r === CATALOG_REL) parseCatalog(dataRepo.root, content); else JSON.parse(content); },
+          idempotencyKey,
+          actor: actor(principal)
+        });
+        return { key, entry, persistence: persistenceOf(op) };
+      });
     }
   });
 }

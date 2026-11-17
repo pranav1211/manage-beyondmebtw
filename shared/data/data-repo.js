@@ -68,7 +68,9 @@ export function createDataRepo({
   branch = 'main',
   expectedRemote,
   stateRoot,
-  allowedPrefixes = ['data/', 'content/', 'registry/'],
+  // catalog/catalog.json: only the admin "add dataset" workflow writes it (catalog entries
+  // themselves can only point under data/ or content/, so the resource API can never reach it).
+  allowedPrefixes = ['data/', 'content/', 'registry/', 'catalog/catalog.json'],
   author = { name: 'manage', email: 'manage@localhost' },
   faults = null,
   pushAttempts = 3,
@@ -163,7 +165,8 @@ export function createDataRepo({
   // ── Paths ───────────────────────────────────────────────────────────────
   function owned(relPath) {
     const norm = String(relPath).replace(/\\/g, '/');
-    if (!allowedPrefixes.some((p) => norm.startsWith(p))) {
+    // "dir/" entries own everything below them; entries without a trailing slash own exactly that file.
+    if (!allowedPrefixes.some((p) => (p.endsWith('/') ? norm.startsWith(p) : norm === p))) {
       throw new AppError('PATH_VIOLATION', 'Path is not owned by the data workflow', { path: norm });
     }
     resolveWithinRoot(root, norm); // traversal, encoded traversal, absolute, symlink escape

@@ -15,6 +15,13 @@ const ACTIONS = [
   { op: 'build', label: 'Build', confirm: true },
   { op: 'pm2.stop', label: 'Stop', confirm: true, node: true, danger: true }
 ];
+// The developer's top priority comes first everywhere apps are listed; the rest keep registry order.
+const PRIORITY = ['beyondmebtw'];
+export const byPriority = (list) => list.slice().sort((a, b) => {
+  const pa = PRIORITY.indexOf(a.application), pb = PRIORITY.indexOf(b.application);
+  return (pa === -1 ? PRIORITY.length : pa) - (pb === -1 ? PRIORITY.length : pb);
+});
+const hostLinks = (e) => [e.domain, ...(e.aliases || [])].map((h) => `<a href="https://${esc(h)}" target="_blank" rel="noopener">${esc(h)}</a>`).join('<br>');
 const opState = (o) => (o.status === 'succeeded' && o.result && o.result.noop ? badge('noop', 'no-op') : badge(o.status));
 
 function tabs(active) {
@@ -46,8 +53,8 @@ async function appsList(view) {
   view.innerHTML = `${header('Apps &amp; deploys', `${reg.applications.length} applications, registered in <code>${esc(reg.source.repository)}</code>. Pushes deploy automatically unless auto-deploy is off.`, 'apps')}
     ${ops ? '' : '<div class="banner bad">Argus is unreachable: runtime state and history are unknown.</div>'}
     <table><thead><tr><th>Application</th><th>Type</th><th>Domain</th><th>State</th><th>Last operation</th></tr></thead><tbody>
-    ${reg.applications.map((e) => { const o = latest.get(e.application); return `<tr class="click" data-href="#/apps/${encodeURIComponent(e.application)}">
-      <td><b>${esc(e.application)}</b></td><td>${esc(e.type)}</td><td><a href="https://${esc(e.domain)}" target="_blank" rel="noopener">${esc(e.domain)}</a></td>
+    ${byPriority(reg.applications).map((e) => { const o = latest.get(e.application); return `<tr class="click" data-href="#/apps/${encodeURIComponent(e.application)}">
+      <td><b>${esc(e.application)}</b></td><td>${esc(e.type)}</td><td class="small">${hostLinks(e)}</td>
       <td>${e.enabled ? badge('enabled') : badge('disabled')} ${e.autoDeploy === false ? badge('pending', 'auto-deploy off') : ''}${e.environment === 'test' ? ` ${badge('test')}` : ''}</td>
       <td>${o ? `${esc(o.operation)} ${opState(o)} <span class="muted small">${esc(ago(o.createdAt))}</span>` : `<span class="muted">${ops ? 'none' : 'unknown'}</span>`}</td></tr>`; }).join('')}
     </tbody></table>`;
@@ -69,7 +76,7 @@ async function appDetail(view, name, { reroute }) {
   const exec = st.executable;
   view.innerHTML = `
     <div class="head"><div><div class="kicker"><a href="#/apps">Apps &amp; deploys</a></div><h1 class="mid">${esc(entry.application)}</h1>
-      <p class="sub">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.autoDeploy === false ? badge('pending', 'auto-deploy off') : badge('ok', 'auto-deploy on')} ${entry.environment === 'test' ? badge('test', 'test target') : ''} · <a href="https://${esc(entry.domain)}" target="_blank" rel="noopener">${esc(entry.domain)} ${icon('ext')}</a></p></div>
+      <p class="sub">${entry.enabled ? badge('enabled') : badge('disabled')} ${entry.autoDeploy === false ? badge('pending', 'auto-deploy off') : badge('ok', 'auto-deploy on')} ${entry.environment === 'test' ? badge('test', 'test target') : ''} · ${[entry.domain, ...(entry.aliases || [])].map((h) => `<a href="https://${esc(h)}" target="_blank" rel="noopener">${esc(h)}</a>`).join(' · ')}</p></div>
       <div class="acts"><a class="btn" href="#/registry/${encodeURIComponent(entry.application)}/edit">${icon('edit')}Edit registry entry</a></div></div>
     ${st.unavailable ? `<div class="banner bad">Argus is unavailable (${esc(st.code)}). Runtime state is unknown.</div>` : ''}
     ${st.undeployedPush ? `<div class="banner warn">Pushed but <b>not deployed</b> (auto-deploy is off): <code>${esc(st.undeployedPush.commit.slice(0, 12))}</code> · ${esc(time(st.undeployedPush.at))}. Deploy latest to ship it, or Restart to restart without deploying.</div>` : ''}
@@ -246,15 +253,21 @@ async function reconcile(view) {
 }
 
 // ── registry ──
-const FIELDS = ['application', 'repository', 'branch', 'type', 'deploymentPath', 'domain', 'isPrimaryDomain', 'pm2Config', 'nginxConfig', 'enabled', 'environment', 'webhookSecretRef'];
-function readForm(form) {
+const FIELDS = ['application', 'repository', 'branch', 'type', 'deploymentPath', 'domain', 'isPrimaryDomain', 'pm2Config', 'nginxConfig', 'enabled', 'environment', 'webhookSecretRef', 'aliases'];
+/**
+ * The registry PUT replaces the whole entry, so fields this form doesn't show (autoDeploy, …)
+ * are carried over from the existing entry instead of being silently dropped.
+ */
+function readForm(form, existing) {
   const fd = new FormData(form);
   const out = {};
+  if (existing) for (const [k, v] of Object.entries(existing)) if (!FIELDS.includes(k)) out[k] = v;
   for (const k of FIELDS) {
     if (k === 'isPrimaryDomain' || k === 'enabled') { out[k] = fd.get(k) === 'on'; continue; }
     const raw = String(fd.get(k) ?? '').trim();
     if (k === 'pm2Config' || k === 'nginxConfig') { out[k] = raw === '' ? null : raw; continue; }
     if (k === 'webhookSecretRef') { if (raw) out[k] = raw; continue; }
+    if (k === 'aliases') { const list = [...new Set(raw.split(/[\s,]+/).map((h) => h.trim().toLowerCase()).filter(Boolean))]; if (list.length) out[k] = list; continue; }
     out[k] = raw;
   }
   return out;
@@ -278,13 +291,14 @@ async function registry(view, editName) {
         <label class="f"><span>Nginx config file (optional)</span><input class="in mono" name="nginxConfig" value="${v('nginxConfig')}"></label></div>
       <div class="f2"><label class="f"><span>Environment</span><select class="in" name="environment"><option value="production" ${!e || e.environment !== 'test' ? 'selected' : ''}>production</option><option value="test" ${e && e.environment === 'test' ? 'selected' : ''}>test (never executed in production)</option></select></label>
         <label class="f"><span>Webhook secret env var (optional)</span><input class="in mono" name="webhookSecretRef" value="${v('webhookSecretRef')}" placeholder="default secret if empty"></label></div>
+      <label class="f"><span>Other hostnames <em>comma separated; shown here, routed by nginx</em></span><input class="in mono" name="aliases" value="${esc(((e && e.aliases) || []).join(', '))}" placeholder="blog.beyondmebtw.com, www.example.com"></label>
       <label class="check"><input type="checkbox" class="toggle" name="isPrimaryDomain" ${e && e.isPrimaryDomain ? 'checked' : ''}>Primary domain</label>
       <label class="check"><input type="checkbox" class="toggle" name="enabled" ${!e || e.enabled ? 'checked' : ''}>Enabled</label>
       <div class="formbar"><button class="btn primary" type="submit">${e ? 'Save entry' : 'Register application'}</button><button class="btn ghost" type="button" data-retry>Retry push</button></div>
     </form></section>`;
   $('[data-f]', view).addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const body = readForm(ev.target);
+    const body = readForm(ev.target, e);
     await busy($('button[type=submit]', ev.target), 'Saving', async () => {
       try {
         const r = e ? await api.updateApp(e.application, body) : await api.createApp(body);

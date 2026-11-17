@@ -14,7 +14,25 @@ export class ApiError extends Error {
 
 const idem = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `k${Date.now()}${Math.random().toString(36).slice(2)}`);
 
-async function call(method, path, body, { idempotent = false } = {}) {
+// Activity signals for the UI (top progress bar, "saving…" status). Events, so api.js has no UI imports.
+let inFlight = 0;
+const emit = (name, detail) => { try { window.dispatchEvent(new CustomEvent(name, { detail })); } catch { /* non-browser */ } };
+
+async function call(method, path, body, opts = {}) {
+  const write = method !== 'GET';
+  inFlight += 1;
+  emit('manage:net', inFlight);
+  if (write) emit('manage:write', 'start');
+  try {
+    return await request(method, path, body, opts);
+  } finally {
+    inFlight -= 1;
+    emit('manage:net', inFlight);
+    if (write) emit('manage:write', 'end');
+  }
+}
+
+async function request(method, path, body, { idempotent = false } = {}) {
   const headers = { accept: 'application/json' };
   if (body !== undefined) headers['content-type'] = 'application/json';
   if (method !== 'GET' && csrfToken) headers['x-csrf-token'] = csrfToken;
@@ -88,5 +106,7 @@ export const api = {
   updateItem: (key, id, item, ifRevision) => call('PUT', `${R(key)}/items/${encodeURIComponent(id)}`, { item, ifRevision }, W),
   deleteItem: (key, id, ifRevision) => call('DELETE', `${R(key)}/items/${encodeURIComponent(id)}`, { ifRevision }, W),
   // changes: [{ key, data, ifRevision } | { key, delete: true, ifRevision }] — one commit, all or nothing.
-  transaction: (changes) => call('POST', '/data/transactions', { changes }, W)
+  transaction: (changes) => call('POST', '/data/transactions', { changes }, W),
+  // Admin: add a dataset (catalog entry + a document's first content), one commit.
+  createDataset: (spec) => call('POST', '/data/catalog', spec, W)
 };

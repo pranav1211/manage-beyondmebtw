@@ -252,6 +252,63 @@ test('concurrency: same-resource writes serialize (none lost); registry + data w
   assert.equal(git(repo.checkout, ['status', '--porcelain']), '');
 });
 
+// ── Adding datasets (admin) ────────────────────────────────────────────────
+test('datasets: the admin adds a document with items in one commit; it is readable and writable at once', async () => {
+  const repo = makeSeededDataRepo();
+  const { call } = await boot(repo);
+  const before = commitCount(repo);
+  const r = await call('POST', '/data/catalog', { key: 'f1.drivers', title: 'F1 drivers', owner: 'f1-titles-data', kind: 'document', access: 'public', items: { pointer: '/drivers', idField: 'id' } });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(r.body.entry.path, 'f1/drivers.json');
+  assert.equal(commitCount(repo), before + 1, 'catalog entry and first content: one commit');
+  const shown = git(repo.bare, ['show', '--stat', '--format=%s', 'main']);
+  assert.match(shown, /manage: add dataset f1\.drivers/);
+  assert.match(shown, /catalog\/catalog\.json/);
+  assert.match(shown, /data\/f1\/drivers\.json/);
+  const read = await call('GET', '/data/resources/f1.drivers', undefined, { auth: false });
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.body.data, { drivers: [] });
+  const add = await call('POST', '/data/resources/f1.drivers/items', { item: { id: 'ham', name: 'Hamilton' }, ifRevision: read.body.revision });
+  assert.equal(add.status, 200, JSON.stringify(add.body));
+  assert.equal(JSON.parse(git(repo.bare, ['show', 'main:data/f1/drivers.json'])).drivers[0].name, 'Hamilton');
+  // the same key again is refused, and nothing is committed
+  const again = await call('POST', '/data/catalog', { key: 'f1.drivers', kind: 'document', access: 'public' });
+  assert.equal(again.status, 409);
+  assert.equal(commitCount(repo), before + 2);
+});
+
+test('datasets: a collection gets members through the normal API; collisions, bad input and non-admins are refused', async () => {
+  const repo = makeSeededDataRepo();
+  const { call } = await boot(repo);
+  const r = await call('POST', '/data/catalog', { key: 'race.weekends', kind: 'collection', access: 'private', idPattern: '^[0-9]{4}$' });
+  assert.equal(r.status, 201, JSON.stringify(r.body));
+  assert.equal(r.body.entry.path, 'race/weekends/{id}.json');
+  assert.deepEqual(r.body.entry.operations, ['read', 'replace', 'create', 'delete']);
+  const m = await call('PUT', '/data/resources/race.weekends.2027', { data: { rounds: 24 } });
+  assert.equal(m.status, 200, JSON.stringify(m.body));
+  assert.equal((await call('GET', '/data/resources/race.weekends.2027', undefined, { auth: false })).status, 404, 'private stays hidden');
+  assert.equal((await call('GET', '/data/resources/race.weekends.2027')).body.data.rounds, 24);
+  assert.equal((await call('PUT', '/data/resources/race.weekends.abc', { data: {} })).status, 404, 'ids outside the pattern are not members');
+  const before = commitCount(repo);
+  for (const [spec, why] of [
+    [{ key: 'race.weekends.2028', kind: 'document', access: 'public' }, 'would be a member of the collection'],
+    [{ key: 'notes', kind: 'document', access: 'public' }, 'existing key'],
+    [{ key: 'list.list', kind: 'document', access: 'public' }, 'existing file path'],
+    [{ key: 'race', kind: 'collection', access: 'public' }, 'parent of an existing key'],
+    [{ key: 'Bad Key', kind: 'document', access: 'public' }, 'invalid key'],
+    [{ key: 'x.y', kind: 'table', access: 'public' }, 'invalid kind'],
+    [{ key: 'x.y', kind: 'document', access: 'world' }, 'invalid access'],
+    [{ key: 'x.y', kind: 'document', access: 'public', path: '../../etc' }, 'unknown field'],
+    [{ key: 'x.y', kind: 'document', access: 'public', items: { pointer: '/rows', idField: 'id' }, initial: { rows: {} } }, 'items container not an array']
+  ]) {
+    const res = await call('POST', '/data/catalog', spec);
+    assert.ok(res.status >= 400 && res.status < 500, `${why}: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  assert.equal(commitCount(repo), before, 'refusals commit nothing');
+  assert.equal((await call('POST', '/data/catalog', { key: 'z.z', kind: 'document', access: 'public' }, { auth: false })).status, 401);
+  assert.equal((await call('POST', '/data/catalog', { key: 'z.z', kind: 'document', access: 'public' }, { csrf: false })).status, 403);
+});
+
 // ── bmb-data webhook ───────────────────────────────────────────────────────
 test('bmb-data webhook: signature, identity, ping, fast-forward sync visible to reads, duplicate delivery no-op', async () => {
   const repo = makeSeededDataRepo();

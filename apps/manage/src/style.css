@@ -362,7 +362,13 @@ pre.json { background: var(--surface-2); padding: 12px; font-family: var(--mono)
   .feature, .mainslot { grid-template-columns: 1fr; }
   .feats, .slots, .slots.three, .cols-2, .cols-3, .f2, .f3 { grid-template-columns: 1fr; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  /* The login's strike-and-land always plays (developer's choice). */
+  .login.animate .was { animation: was-fade .6s ease 1.6s forwards !important; }
+  .login.animate .was::after { animation: strike .45s cubic-bezier(.6, 0, .2, 1) 1.15s forwards !important; }
+  .login.animate .is { animation: land .55s cubic-bezier(.2, .9, .25, 1.25) 1.95s forwards !important; }
+}
 
 /* ── Surface: static contour lines behind everything, a frosted-glass rail, rounded corners ── */
 /* The contours live on their own fixed, composited layer: drawn once, never repainted on scroll.

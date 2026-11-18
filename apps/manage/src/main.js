@@ -85,7 +85,8 @@ function continueAppLogin() {
 function showLogin(message) {
   cleanup();
   nav.classList.add('hidden');
-  const animate = !message && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Always plays on arrival (the developer's choice, even with reduced motion); a retry shows the final line.
+  const animate = !message;
   view.innerHTML = `
     <section class="login ${animate ? 'animate' : ''}">
       <h1 class="bond">I’ve been expecting you, <span class="mr">Mr.&nbsp;<span class="was">Bond</span><span class="is">V.</span></span></h1>
